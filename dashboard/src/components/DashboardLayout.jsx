@@ -4,6 +4,7 @@ import styles from './DashboardLayout.module.css'
 
 const NAV = [
   { to: '/app', label: 'Register', end: true },
+  { to: '/app/calendar', label: 'Site calendar' },
   { to: '/app/pay', label: 'Pay runs' },
   { to: '/app/crew', label: 'Crew' },
   { to: '/app/whatsapp', label: 'WhatsApp simulator' },

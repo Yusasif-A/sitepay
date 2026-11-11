@@ -7,7 +7,7 @@ import { money } from '../lib/format'
 const EMPTY = { name: '', phone: '', trade: '', daily_rate: '', ot_rate: '', paypal_email: '' }
 
 export default function Crew() {
-  const { token, me, refresh } = useAuth()
+  const { token, me, refresh, setSiteId } = useAuth()
   const { site } = useOutletContext()
   const [workers, setWorkers] = useState([])
   const [form, setForm] = useState(EMPTY)
@@ -51,12 +51,20 @@ export default function Crew() {
     try {
       const r = await api.post('/api/demo/seed', {}, token)
       await refresh()
-      setInfo(`Demo site “${r.site.name}” created with 4 workers and the past 6 days of register. Switch to it in the site picker.` +
+      setSiteId(r.site.site_id)
+      setInfo(`Demo site “${r.site.name}” created with 4 workers and the past 6 days of register.` +
         (r.using_placeholder_emails ? ' Workers have placeholder PayPal emails; set DEMO_PAYPAL_RECEIVERS or edit them to your sandbox personal account.' : ''))
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
-  if (!site) return <div className="card panel"><p>Create a site first.</p></div>
+  if (!site) return (
+    <div className="card panel">
+      <h2>No site yet</h2>
+      {error && <div className="banner banner-error">{error}</div>}
+      <p className="muted" style={{ marginBottom: 12 }}>Add a site on the Sites page, or load the demo crew (it creates its own site).</p>
+      <button className="btn btn-primary" onClick={seed} disabled={busy}>Load demo crew</button>
+    </div>
+  )
 
   return (
     <div>

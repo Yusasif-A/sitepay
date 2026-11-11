@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useOutletContext } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community'
 import { api } from '../lib/api'
@@ -49,7 +49,8 @@ export default function Register() {
   const navigate = useNavigate()
   const settings = me?.settings
   const currency = settings?.wage_currency || 'NGN'
-  const [date, setDate] = useState(() => todayIn(settings))
+  const [params] = useSearchParams()
+  const [date, setDate] = useState(() => params.get('date') || todayIn(settings))
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')

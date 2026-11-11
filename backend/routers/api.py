@@ -199,6 +199,31 @@ def get_register(site_id: str, date: str, sid: str = Depends(require_supervisor)
     return {"date": day, "rows": rows}
 
 
+@router.get("/register/range")
+def get_register_range(site_id: str, start: str, end: str, sid: str = Depends(require_supervisor)):
+    """Every logged day for a site over a period, for the calendar view."""
+    days = _guard(attendance.date_range, start, end)
+    if not accounts.get_site(sid, site_id):
+        raise HTTPException(status_code=404, detail="Site not found")
+    workers = accounts.list_workers(sid, site_id, active_only=True)
+    photo_counts = {}
+    for ev in evidence.for_days(sid, site_id, days):
+        if ev["kind"] == "photo":
+            key = (ev["worker_id"], ev["date"])
+            photo_counts[key] = photo_counts.get(key, 0) + 1
+    records = [{
+        "worker_id": d["worker_id"], "date": d["date"], "status": d["status"],
+        "ot_hours": d.get("ot_hours", 0), "advance": d.get("advance", 0), "notes": d.get("notes", ""),
+        "review": d.get("review"), "pay_run_id": d.get("pay_run_id"),
+        "photos": photo_counts.get((d["worker_id"], d["date"]), 0),
+    } for d in attendance.days_for_site(sid, site_id, days)]
+    return {
+        "workers": [{"worker_id": w["worker_id"], "name": w["name"], "trade": w.get("trade", ""),
+                     "daily_rate": w["daily_rate"]} for w in workers],
+        "days": records,
+    }
+
+
 class DayPatch(BaseModel):
     status: Optional[str] = None
     ot_hours: Optional[float] = None

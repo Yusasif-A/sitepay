@@ -462,3 +462,6 @@ h1, h2, h3, h4, p {
 .linklike:hover { color: var(--color-primary-dark); text-decoration-color: currentColor; }
 .ag-cell .status-pill { line-height: 1.4; vertical-align: middle; }
 .ag-cell { display: flex; align-items: center; }
+
+/* Site calendar (Bryntum): days already in a pay run are faded */
+.b-sch-event-wrap.sp-paid { opacity: 0.45; }
