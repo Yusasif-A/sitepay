@@ -90,34 +90,72 @@ async def _chat(system: str, user_content, model: str) -> Optional[dict]:
 
 # ── Photo evidence ───────────────────────────────────────────────────────────
 
-_PHOTO_PROMPT = f"""You review work photos for SitePay, a day-labour payroll tool used on construction sites, farms and loading yards in Nigeria.
+_PHOTO_PROMPT = f"""You review photos for SitePay, a day-labour payroll tool used on construction sites, farms and loading yards in Nigeria.
 
-A worker sent this photo as proof of the work they did today. Describe what the photo shows so their supervisor can approve the day quickly. You do NOT decide pay and you never accuse anyone; you only describe.
+A worker sent this photo on WhatsApp. It is one of two kinds (you'll be told which):
+- CHECK-IN photo: proves the worker is on site at the start of the day. Usually a selfie or a photo of the worker with the site behind them.
+- WORK photo: proves the work done, e.g. a wall built, blocks laid, a room painted, bags loaded. A person may or may not be in it.
+
+Describe what the photo shows so the supervisor can approve the day quickly. You do NOT decide pay and you never accuse anyone; you only describe what is visible.
 
 Return ONE JSON object, nothing else:
 {{
   "scene_type": one of {list(SCENE_TYPES)},
   "is_work_related": true/false,
-  "progress": "one short phrase on visible progress, e.g. 'wall section appears completed', 'materials stacked, work not started'",
+  "person_visible": true/false,
+  "on_site": true/false,
+  "progress": "one short phrase on visible work or progress, e.g. 'block wall about 7 courses high', 'multi-storey frame with scaffolding'",
   "summary": "one plain sentence (max 25 words) a busy supervisor can read at a glance",
+  "visible_timestamp": "any date/time printed ON the photo itself (e.g. a camera stamp), exactly as shown, or empty string",
   "image_quality": "good" | "dark" | "blurry" | "too_far",
   "confidence": "high" | "medium" | "low"
 }}
 
 Rules:
-- is_work_related is false only if the photo clearly shows nothing to do with site or farm work (a selfie in a room, a screenshot, a meme, etc.).
-- Describe only what is visible. Don't guess how many hours were worked or whether the worker was present all day.
-- If the worker's caption or trade is given, use it as context, but don't repeat it as fact if the photo doesn't support it."""
+- on_site is true when the background clearly looks like a work site: buildings under construction, blocks, scaffolding, sand, tools, a farm or a loading yard.
+- is_work_related is false only if the photo clearly has nothing to do with site or farm work (a room at home, a screenshot, a meme, etc.).
+- visible_timestamp: copy only text actually printed on the image. Never guess a date from lighting or content.
+- Don't guess how many hours were worked or whether the worker stayed all day.
+- Use the worker's caption or trade as context, but don't repeat it as fact if the photo doesn't support it."""
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+
+def _stamp_date(stamp: str) -> Optional[str]:
+    """Best-effort ISO date from a camera stamp like '11 NOV 2026 07:14 AM',
+    '2026-11-11 07:14' or '11/11/2026'. None if it can't be read reliably."""
+    s = stamp.strip().lower()
+    m = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.search(r"(\d{1,2})\s*([a-z]{3})[a-z]*\.?\s*(\d{4})", s)
+        if m and m.group(2) in _MONTHS:
+            d, mo, y = int(m.group(1)), _MONTHS[m.group(2)], int(m.group(3))
+        else:
+            m = re.search(r"(\d{1,2})[/.](\d{1,2})[/.](\d{4})", s)
+            if not m:
+                return None
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))  # day-first, as in Nigeria
+    try:
+        from datetime import date
+        return date(y, mo, d).isoformat()
+    except ValueError:
+        return None
 
 
 def unavailable(reason: str) -> dict:
     return {"ok": False, "reason": reason, "summary": "", "flags": []}
 
 
-async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "") -> dict:
+async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpose: str = "work",
+                          expected_date: str = "") -> dict:
+    """purpose: "check_in" or "work". expected_date: the ISO day the photo is
+    filed under, compared with any timestamp printed on the photo."""
     if not config.AI_ENABLED:
         return unavailable("AI not configured")
-    context = []
+    context = [f"This is a {'CHECK-IN' if purpose == 'check_in' else 'WORK'} photo."]
     if trade:
         context.append(f"Worker's trade: {trade}.")
     context.append(f'Worker caption: "{caption.strip()}".' if caption.strip() else "No caption.")
@@ -135,17 +173,33 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "") -> di
 
     scene = str(parsed.get("scene_type", "other")).lower()
     quality = str(parsed.get("image_quality", "good")).lower()
+    person = parsed.get("person_visible") is True
+    on_site = parsed.get("on_site") is not False
+    stamp = str(parsed.get("visible_timestamp", "") or "").strip()[:40]
+    stamp_date = _stamp_date(stamp) if stamp else None
+
     flags = []
     if parsed.get("is_work_related") is False:
         flags.append("unrelated")
+    if not on_site:
+        flags.append("not_on_site")
+    if purpose == "check_in" and not person:
+        flags.append("no_person")
     if quality in ("dark", "blurry", "too_far"):
         flags.append(f"quality_{quality}")
+    if stamp_date and expected_date and stamp_date != expected_date:
+        flags.append("timestamp_mismatch")
     return {
         "ok": True,
+        "purpose": purpose,
         "scene_type": scene if scene in SCENE_TYPES else "other",
         "is_work_related": parsed.get("is_work_related") is not False,
+        "person_visible": person,
+        "on_site": on_site,
         "progress": str(parsed.get("progress", ""))[:160],
         "summary": str(parsed.get("summary", ""))[:300],
+        "visible_timestamp": stamp,
+        "timestamp_date": stamp_date,
         "image_quality": quality,
         "confidence": str(parsed.get("confidence", "medium")).lower(),
         "flags": flags,

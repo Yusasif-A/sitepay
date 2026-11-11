@@ -20,6 +20,7 @@ import bot
 import config
 import evidence
 import payruns
+import schedule
 import whatsapp
 from accounts import AccountError
 from auth import create_token, require_supervisor
@@ -191,6 +192,7 @@ def get_register(site_id: str, date: str, sid: str = Depends(require_supervisor)
             "source": rec["source"] if rec else None,
             "checked_in": bool(rec and rec.get("check_in_at")),
             "has_location": bool(rec and rec.get("check_in_location")),
+            "location": rec.get("check_in_location") if rec else None,
             "pay_run_id": rec.get("pay_run_id") if rec else None,
             "photo_count": sum(1 for e in evs if e["kind"] == "photo"),
             "evidence": evs,
@@ -221,7 +223,45 @@ def get_register_range(site_id: str, start: str, end: str, sid: str = Depends(re
         "workers": [{"worker_id": w["worker_id"], "name": w["name"], "trade": w.get("trade", ""),
                      "daily_rate": w["daily_rate"]} for w in workers],
         "days": records,
+        "shifts": schedule.for_site(sid, site_id, days),
+        "today": attendance.today(),
     }
+
+
+# ── Schedule (Site calendar) ─────────────────────────────────────────────────
+
+class ShiftBody(BaseModel):
+    site_id: str
+    worker_id: str
+    start: str
+    end: str
+    task: str = ""
+    start_time: str = ""
+
+
+@router.post("/schedule")
+async def create_shift(body: ShiftBody, sid: str = Depends(require_supervisor)):
+    """Schedule a worker for one or more future days and tell them on WhatsApp."""
+    result = await run_in_threadpool(_guard, schedule.create, sid, body.site_id, body.worker_id,
+                                     body.start, body.end, body.task, body.start_time)
+    worker, site = result["worker"], result["site"]
+    text = schedule.message_for(worker, site, result["dates"], body.task.strip(), body.start_time.strip())
+    delivered = await whatsapp.notify(worker["phone"], text)
+    schedule.mark_notified(worker["worker_id"], result["dates"])
+    return {"shifts": result["shifts"], "delivered": delivered, "message": text}
+
+
+@router.delete("/schedule/{worker_id}/{date}")
+async def delete_shift(worker_id: str, date: str, sid: str = Depends(require_supervisor)):
+    removed = await run_in_threadpool(_guard, schedule.delete, sid, worker_id, date)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No shift on that day")
+    worker = accounts.get_worker(sid, worker_id)
+    site = accounts.get_site(sid, removed["site_id"])
+    delivered = False
+    if worker and site and removed["date"] >= attendance.today():
+        delivered = await whatsapp.notify(worker["phone"], schedule.cancel_message(worker, site, removed["date"]))
+    return {"ok": True, "delivered": delivered}
 
 
 class DayPatch(BaseModel):
@@ -311,7 +351,7 @@ async def upload_evidence(worker_id: str = Form(...), date: str = Form(...), cap
         ev = evidence.add_photo(worker, day, data, caption, source="dashboard")
     except evidence.ImageError:
         raise HTTPException(status_code=422, detail="That file isn't a readable image")
-    result = await bot.summarise(ev["evidence_id"], caption, worker.get("trade", ""))
+    result = await bot.summarise(ev["evidence_id"], caption, worker.get("trade", ""), "work", day)
     return {**ev, "ai": result}
 
 
@@ -319,7 +359,8 @@ async def upload_evidence(worker_id: str = Form(...), date: str = Form(...), cap
 async def reanalyse(evidence_id: str, sid: str = Depends(require_supervisor)):
     if not evidence.get_image(sid, evidence_id):
         raise HTTPException(status_code=404, detail="Photo not found")
-    return await bot.summarise(evidence_id, "", "")
+    doc = evidence.get_db().evidence.find_one({"evidence_id": evidence_id}, {"purpose": 1, "date": 1, "text": 1})
+    return await bot.summarise(evidence_id, doc.get("text", ""), "", doc.get("purpose", "work"), doc["date"])
 
 
 # ── Pay runs ─────────────────────────────────────────────────────────────────

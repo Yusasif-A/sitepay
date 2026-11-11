@@ -76,3 +76,5 @@ def _ensure_indexes(db: Database) -> None:
     db.pay_runs.create_index("supervisor_id")
     db.pay_lines.create_index([("run_id", ASCENDING), ("worker_id", ASCENDING)], unique=True)
     db.chat_state.create_index("phone", unique=True)
+    db.shifts.create_index([("worker_id", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.shifts.create_index([("site_id", ASCENDING), ("date", ASCENDING)])

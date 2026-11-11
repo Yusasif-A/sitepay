@@ -39,6 +39,9 @@ export const FLAG_TEXT = {
   quality_dark: 'Dark',
   quality_blurry: 'Blurry',
   quality_too_far: 'Too far away',
+  not_on_site: "Doesn't look like a site",
+  no_person: 'No worker in check-in photo',
+  timestamp_mismatch: 'Photo stamp is a different day',
 }
 
 export const TX_STATUS = {

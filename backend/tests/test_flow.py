@@ -277,3 +277,48 @@ def test_webhook_verify_and_text(client, monkeypatch):
     payload = {"entry": [{"changes": [{"value": {"messages": [
         {"from": "2348000000000", "id": "m1", "type": "audio", "audio": {"id": "a"}}]}}]}]}
     assert client.post("/whatsapp", json=payload).status_code == 200
+
+
+def test_schedule_sends_whatsapp_and_shows_on_calendar(client):
+    import attendance
+    import whatsapp
+    h, site = signup(client)
+    w = add_worker(client, h, site, "Musa Abdullahi", "08030000001", 12000, "musa@personal.example.com")
+    t = attendance.today()
+    tomorrow = (date.fromisoformat(t) + timedelta(days=1)).isoformat()
+    day3 = (date.fromisoformat(t) + timedelta(days=3)).isoformat()
+
+    r = client.post("/api/schedule", headers=h, json={"site_id": site, "worker_id": w["worker_id"],
+                                                      "start": tomorrow, "end": day3, "task": "Blockwork, 2nd floor",
+                                                      "start_time": "07:30"})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["shifts"]) == 3
+    msg = whatsapp.chat_history(w["phone"])[-1]["text"]
+    assert "you've been scheduled" in msg and "Blockwork, 2nd floor" in msg and "07:30" in msg and "(3 days)" in msg
+    assert "Check in" in msg
+
+    cal = client.get(f"/api/register/range?site_id={site}&start={t}&end={day3}", headers=h).json()
+    assert sorted(s["date"] for s in cal["shifts"]) == [tomorrow, (date.fromisoformat(t) + timedelta(days=2)).isoformat(), day3]
+    assert all(s["notified"] for s in cal["shifts"])
+
+    # Past days can't be scheduled
+    yesterday = (date.fromisoformat(t) - timedelta(days=1)).isoformat()
+    bad = client.post("/api/schedule", headers=h, json={"site_id": site, "worker_id": w["worker_id"],
+                                                        "start": yesterday, "end": yesterday})
+    assert bad.status_code == 422
+
+    # Removing a shift tells the worker
+    r = client.delete(f"/api/schedule/{w['worker_id']}/{tomorrow}", headers=h)
+    assert r.status_code == 200
+    assert "no longer scheduled" in whatsapp.chat_history(w["phone"])[-1]["text"]
+
+    # Scheduling never touches pay
+    assert attendance.get_day(w["worker_id"], tomorrow) is None
+
+
+def test_ai_stamp_date_parsing():
+    import ai
+    assert ai._stamp_date("11 NOV 2026 07:14 AM") == "2026-11-11"
+    assert ai._stamp_date("2026-11-11 07:14") == "2026-11-11"
+    assert ai._stamp_date("11/11/2026") == "2026-11-11"
+    assert ai._stamp_date("07:14 AM") is None

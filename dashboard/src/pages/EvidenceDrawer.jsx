@@ -64,18 +64,33 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
           </div>
           <p className="small muted">
             {row.checked_in ? 'Checked in on WhatsApp' : row.logged ? 'Logged on dashboard' : 'No check-in yet'}
-            {row.has_location ? ' · 📍 location shared' : ''}
           </p>
+          {row.location && (
+            <p className="small" style={{ marginTop: 6 }}>
+              📍 Location shared:{' '}
+              <a href={`https://maps.google.com/?q=${row.location.lat},${row.location.lon}`} target="_blank" rel="noreferrer">
+                {Number(row.location.lat).toFixed(5)}, {Number(row.location.lon).toFixed(5)}
+              </a>
+            </p>
+          )}
           {locked && <div className="banner banner-info" style={{ marginTop: 12, marginBottom: 0 }}>In pay run {row.pay_run_id}. Locked.</div>}
         </div>
 
         {err && <div className="banner banner-error">{err}</div>}
         {msg && <div className="banner banner-success">{msg}</div>}
 
-        <h3 style={{ fontWeight: 800, margin: '8px 0 10px' }}>Work photos ({photos.length})</h3>
+        <h3 style={{ fontWeight: 800, margin: '8px 0 10px' }}>Photos ({photos.length})</h3>
         {photos.length === 0 && <p className="muted small" style={{ marginBottom: 12 }}>No photos yet for this day.</p>}
         {photos.map((ev) => (
           <div key={ev.evidence_id} className="card panel" style={{ padding: 14 }}>
+            <div className="row" style={{ marginBottom: 8 }}>
+              <span className={`chip ${ev.purpose === 'check_in' ? 'chip-ok' : 'chip-neutral'}`}>
+                {ev.purpose === 'check_in' ? '✅ Check-in photo' : '🔨 Work photo'}
+              </span>
+              <span className="small muted">
+                {new Date(ev.created_at + (String(ev.created_at).endsWith('Z') ? '' : 'Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
             <div className="photo-grid" style={{ gridTemplateColumns: '1fr' }}>
               <Photo ev={ev} token={token} onOpen={setZoom} />
             </div>
@@ -85,6 +100,15 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
                 <>
                   <p className="small"><strong>AI summary:</strong> {ev.ai.summary}</p>
                   <p className="small muted">{ev.ai.scene_type} · {ev.ai.progress} · confidence {ev.ai.confidence}</p>
+                  <div className="row" style={{ marginTop: 6, gap: 6 }}>
+                    {ev.ai.on_site && <span className="chip chip-ok">On a work site</span>}
+                    {ev.purpose === 'check_in' && ev.ai.person_visible && <span className="chip chip-ok">Worker visible</span>}
+                    {ev.ai.visible_timestamp && (
+                      <span className={`chip ${ev.ai.timestamp_date === date ? 'chip-ok' : 'chip-warn'}`}>
+                        📅 Photo stamp: {ev.ai.visible_timestamp}{ev.ai.timestamp_date === date ? ' (matches)' : ''}
+                      </span>
+                    )}
+                  </div>
                 </>
               ) : (
                 <p className="small muted">AI summary: {ev.ai ? ev.ai.reason : 'analysing…'}</p>

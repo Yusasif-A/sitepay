@@ -465,3 +465,10 @@ h1, h2, h3, h4, p {
 
 /* Site calendar (Bryntum): days already in a pay run are faded */
 .b-sch-event-wrap.sp-paid { opacity: 0.45; }
+
+/* Site calendar: planned (future) shifts are striped */
+.b-sch-event-wrap.sp-shift .b-sch-event {
+  background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.55) 0 6px, transparent 6px 12px);
+  border: 1.5px dashed #94a3b8;
+}
+.sp-shift-pill { background: repeating-linear-gradient(45deg, #e2e8f0 0 4px, #f8fafc 4px 8px); border: 1px dashed #94a3b8; }

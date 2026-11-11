@@ -114,6 +114,7 @@ def add_photo(worker: dict, day: str, image_bytes: bytes, caption: str = "",
         "site_id": worker["site_id"],
         "date": day,
         "kind": "photo",
+        "purpose": "work",
         "text": (caption or "").strip()[:500],
         "image": Binary(jpeg),
         "ahash": facts["ahash"],
@@ -144,6 +145,11 @@ def add_note(worker: dict, day: str, text: str, kind: str = "text", source: str 
     }
     get_db().evidence.insert_one(doc)
     return public(doc)
+
+
+def set_purpose(evidence_id: str, purpose: str) -> None:
+    """'check_in' for the photo that completed check-in, 'work' otherwise."""
+    get_db().evidence.update_one({"evidence_id": evidence_id}, {"$set": {"purpose": purpose}})
 
 
 def set_ai(evidence_id: str, ai_result: dict) -> None:

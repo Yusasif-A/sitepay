@@ -5,3 +5,5 @@ __pycache__/
 node_modules/
 dist/
 .firebase/
+demo_assets/checkin_selfie.jpg
+demo_assets/work_wall.jpg

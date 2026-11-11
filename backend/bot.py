@@ -205,18 +205,22 @@ async def _photo(worker: dict, today: str, image_bytes: bytes, caption: str,
     elif "duplicate_same_day" in ev["flags"]:
         warnings.append("ℹ️ This looks the same as a photo you already sent today.")
 
-    if attendance.is_checked_in(worker["worker_id"], today):
+    checked_in = attendance.is_checked_in(worker["worker_id"], today)
+    purpose = "work" if checked_in else "check_in"
+    if checked_in:
         count = len([e for e in evidence.for_worker_day(worker["worker_id"], today) if e["kind"] == "photo"])
         await reply.text("\n".join([f"📸 Photo received ({count} today). Your supervisor will see it "
                                     "with today's register."] + warnings))
     else:
+        evidence.set_purpose(ev["evidence_id"], "check_in")
         _save_pending(worker, today, photo_evidence_id=ev["evidence_id"])
         if warnings:
             await reply.text("\n".join(warnings))
         if not await _complete_if_ready(worker, today, reply):
             await reply.text("📸 Photo received.\n\n" + ASK_LOCATION)
 
-    task = asyncio.create_task(summarise(ev["evidence_id"], caption or "", worker.get("trade", "")))
+    task = asyncio.create_task(summarise(ev["evidence_id"], caption or "", worker.get("trade", ""),
+                                         purpose, today))
     if wait_for_ai:
         await task
     else:
@@ -224,11 +228,12 @@ async def _photo(worker: dict, today: str, image_bytes: bytes, caption: str,
         task.add_done_callback(_ai_tasks().discard)
 
 
-async def summarise(evidence_id: str, caption: str, trade: str) -> dict:
+async def summarise(evidence_id: str, caption: str, trade: str, purpose: str = "work",
+                    expected_date: str = "") -> dict:
     jpeg = evidence.get_photo_bytes(evidence_id)
     if not jpeg:
         return {}
-    result = await ai.summarise_photo(jpeg, caption, trade)
+    result = await ai.summarise_photo(jpeg, caption, trade, purpose, expected_date)
     evidence.set_ai(evidence_id, result)
     return result
 
