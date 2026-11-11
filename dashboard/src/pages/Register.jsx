@@ -20,9 +20,9 @@ function StatusCell({ value }) {
   return <span className={`status-pill status-${value || 'none'}`}>{value || '–'}</span>
 }
 
-function EvidenceCell({ data }) {
+function EvidenceCell({ data, showAi }) {
   const flags = data.flags || []
-  const summary = data.evidence.find((e) => e.ai?.ok)?.ai.summary
+  const summary = showAi ? data.evidence.find((e) => e.ai?.ok)?.ai.summary : ''
   return (
     <div style={{ lineHeight: 1.3, paddingTop: 6 }}>
       <div className="row" style={{ gap: 6 }}>
@@ -129,10 +129,11 @@ export default function Register() {
         const ot = ['P', 'H', 'OT'].includes(d.status) ? d.ot_hours * d.ot_rate : 0
         return Math.round(f * d.daily_rate + ot)
       }, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, currency)) },
-    { headerName: 'Evidence', flex: 1, minWidth: 240, cellRenderer: EvidenceCell, autoHeight: false },
+    { headerName: 'Evidence', flex: 1, minWidth: 240, cellRenderer: EvidenceCell,
+      cellRendererParams: { showAi: !!settings?.ai_enabled } },
     { headerName: 'Review', width: 120, cellRenderer: ReviewCell },
     { field: 'notes', headerName: 'Notes', width: 150, tooltipField: 'notes' },
-  ], [currency])
+  ], [currency, settings?.ai_enabled])
 
   if (!me?.sites.length) {
     return (
@@ -206,8 +207,8 @@ export default function Register() {
         />
       </div>
 
-      <div className="card panel" style={{ marginTop: 20 }}>
-        <h2>Paste a messy register <span className="chip chip-neutral">AI</span></h2>
+      {settings?.ai_enabled && <div className="card panel" style={{ marginTop: 20 }}>
+        <h2>Paste a messy register</h2>
         <p className="small muted" style={{ marginBottom: 10 }}>
           e.g. “Musa full day +2hrs, Chinedu left 1pm took 1k, Ibrahim no show”. The AI turns it into rows; you check them before anything is saved.
         </p>
@@ -216,7 +217,6 @@ export default function Register() {
           <button className="btn btn-secondary btn-sm" disabled={parseText.trim().length < 2 || parsed?.loading} onClick={runParse}>
             {parsed?.loading ? 'Reading…' : 'Read with AI'}
           </button>
-          {!settings?.ai_enabled && <span className="small muted">AI is off. Set LLM_* in the backend .env.</span>}
         </div>
         {parsed && !parsed.loading && (
           parsed.ok ? (
@@ -237,9 +237,9 @@ export default function Register() {
             </div>
           ) : <div className="banner banner-warn" style={{ marginTop: 12 }}>{parsed.reason}</div>
         )}
-      </div>
+      </div>}
 
-      {open && <EvidenceDrawer row={open} date={date} currency={currency} onClose={() => setOpen(null)} onChanged={load} />}
+      {open && <EvidenceDrawer row={open} date={date} currency={currency} showAi={!!settings?.ai_enabled} onClose={() => setOpen(null)} onChanged={load} />}
     </div>
   )
 }

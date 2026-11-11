@@ -14,7 +14,7 @@ function Photo({ ev, token, onOpen }) {
 }
 
 /** Per-worker evidence panel: photos + AI summary + supervisor actions. */
-export default function EvidenceDrawer({ row, date, currency, onClose, onChanged }) {
+export default function EvidenceDrawer({ row, date, currency, showAi, onClose, onChanged }) {
   const { token } = useAuth()
   const [zoom, setZoom] = useState('')
   const [busy, setBusy] = useState('')
@@ -80,7 +80,7 @@ export default function EvidenceDrawer({ row, date, currency, onClose, onChanged
               <Photo ev={ev} token={token} onOpen={setZoom} />
             </div>
             {ev.text && <p className="small" style={{ marginTop: 8 }}>“{ev.text}”</p>}
-            <div style={{ marginTop: 10 }}>
+            {showAi && <div style={{ marginTop: 10 }}>
               {ev.ai?.ok ? (
                 <>
                   <p className="small"><strong>AI summary:</strong> {ev.ai.summary}</p>
@@ -89,7 +89,7 @@ export default function EvidenceDrawer({ row, date, currency, onClose, onChanged
               ) : (
                 <p className="small muted">AI summary: {ev.ai ? ev.ai.reason : 'analysing…'}</p>
               )}
-            </div>
+            </div>}
             {ev.flags?.length > 0 && (
               <div className="row" style={{ marginTop: 8 }}>
                 {ev.flags.map((f) => <span key={f} className="chip chip-warn">{FLAG_TEXT[f] || f}</span>)}

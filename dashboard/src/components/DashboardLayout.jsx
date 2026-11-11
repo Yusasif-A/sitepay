@@ -48,7 +48,6 @@ export default function DashboardLayout() {
             <span className={`chip ${s.paypal_simulated ? 'chip-warn' : 'chip-ok'}`}>
               PayPal {s.paypal_simulated ? 'simulated' : s.paypal_env}
             </span>
-            <span className={`chip ${s.ai_enabled ? 'chip-ok' : 'chip-neutral'}`}>AI {s.ai_enabled ? 'on' : 'off'}</span>
             <span className={`chip ${s.whatsapp_live ? 'chip-ok' : 'chip-neutral'}`}>
               WhatsApp {s.whatsapp_live ? 'live' : 'simulator'}
             </span>
