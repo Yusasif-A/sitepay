@@ -1,0 +1,151 @@
+/* Sign-in / register shell — SitePay amber on a light background, pill buttons.
+   Full-bleed and roomy on phones. */
+
+.page {
+  --ink: #0f172a;
+  --ink-deep: #0f172a;
+  --brand: #c2410c;
+  --brand-dark: #9a3412;
+  --cream: #f7f6f3;
+  --paper: #ffffff;
+  --line: #e2e8f0;
+  --muted: #64748b;
+
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: 'Plus Jakarta Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  padding: 36px 32px 28px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: 0 24px 50px -30px rgba(15, 23, 42, 0.3);
+}
+
+.wide {
+  max-width: 640px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  color: var(--ink);
+  margin-bottom: 26px;
+}
+
+.brandMark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--brand);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.eyebrow {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brand-dark);
+  margin-bottom: 8px;
+}
+
+.title {
+  font-size: clamp(1.55rem, 5vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-bottom: 26px;
+  line-height: 1.55;
+}
+
+.body {
+  margin-top: 4px;
+}
+
+/* Form controls inside the shell: bigger touch targets, 16px text so
+   phones don't zoom in on focus, and pill buttons like the landing page. */
+.body :global(.field input),
+.body :global(.field select) {
+  min-height: 48px;
+  font-size: 16px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.body :global(.btn-primary) {
+  min-height: 50px;
+  border-radius: 999px;
+  background: var(--brand);
+  font-size: 1rem;
+}
+
+.body :global(.btn-primary:hover:not(:disabled)) {
+  background: var(--brand-dark);
+}
+
+.body :global(.btn-secondary) {
+  border-radius: 999px;
+}
+
+.footer {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.footer a {
+  color: var(--brand-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+}
+
+/* Phones: the card becomes the page — no floating box, no wasted margin. */
+@media (max-width: 520px) {
+  .page {
+    align-items: flex-start;
+    padding: 0;
+    background: var(--paper);
+  }
+
+  .card {
+    max-width: none;
+    min-height: 100vh;
+    padding: 28px 20px 32px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}

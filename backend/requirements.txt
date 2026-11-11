@@ -1,0 +1,14 @@
+fastapi==0.119.1
+uvicorn
+python-multipart
+pydantic
+pymongo
+python-dotenv
+httpx
+openai
+bcrypt
+PyJWT
+Pillow
+tzdata
+# Optional: in-memory database for local dev / tests (MONGO_URI=mongomock://)
+mongomock

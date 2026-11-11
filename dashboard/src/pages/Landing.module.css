@@ -1,0 +1,30 @@
+.page { min-height: 100vh; background: #f7f6f3; font-family: 'Plus Jakarta Sans', Inter, sans-serif; }
+.nav {
+  display: flex; justify-content: space-between; align-items: center;
+  max-width: 1100px; margin: 0 auto; padding: 20px 16px; gap: 12px;
+}
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.2rem; }
+.mark {
+  width: 34px; height: 34px; border-radius: 10px; background: #c2410c; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 800;
+}
+.hero { max-width: 760px; margin: 0 auto; padding: 56px 16px 40px; text-align: center; }
+.hero h1 { font-size: clamp(2rem, 6vw, 3.1rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 18px; }
+.hero p { color: #475569; font-size: 1.08rem; line-height: 1.6; margin-bottom: 28px; }
+.eyebrow {
+  display: inline-block; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #9a3412; background: #ffedd5; padding: 5px 12px; border-radius: 999px; margin-bottom: 18px;
+}
+.steps {
+  max-width: 1100px; margin: 0 auto; padding: 0 16px 32px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px;
+}
+.step { padding: 20px; position: relative; }
+.step h3 { font-size: 1rem; font-weight: 800; margin: 10px 0 6px; }
+.step p { font-size: 0.88rem; color: #64748b; line-height: 1.5; }
+.num { position: absolute; top: 14px; right: 16px; font-weight: 800; color: #e2e8f0; font-size: 1.6rem; }
+.icon { font-size: 1.8rem; }
+.rule {
+  max-width: 760px; margin: 0 auto 60px; padding: 18px 20px; text-align: center;
+  background: #0f172a; color: #e2e8f0; border-radius: 16px; font-size: 0.95rem; line-height: 1.5;
+}
