@@ -114,6 +114,16 @@ def is_checked_in(worker_id: str, day: str) -> bool:
     return get_db().attendance.count_documents({"worker_id": worker_id, "date": day}) > 0
 
 
+def has_check_in_proof(worker_id: str, day: str) -> bool:
+    """True only when the worker's WhatsApp check-in for the day has BOTH a
+    shared location and a check-in photo. A day the supervisor logged on the
+    dashboard (or an older record without proof) does not count."""
+    return get_db().attendance.count_documents({
+        "worker_id": worker_id, "date": day,
+        "check_in_location": {"$nin": [None, {}]}, "check_in_photo": {"$nin": [None, ""]},
+    }) > 0
+
+
 def worker_claim_ot(worker: dict, hours: float, day: Optional[str] = None) -> Optional[dict]:
     """The worker claims overtime on a day they've checked in. Recorded as a
     claim the supervisor sees; it does not change pay until the supervisor

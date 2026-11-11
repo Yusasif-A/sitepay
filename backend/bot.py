@@ -85,7 +85,7 @@ async def handle(phone: str, reply: whatsapp.Replier, *, text: str = "", button_
         return
 
     if button_id == BTN_PHOTO["id"]:
-        if attendance.is_checked_in(worker["worker_id"], today):
+        if attendance.has_check_in_proof(worker["worker_id"], today):
             await reply.text("📸 Take a clear photo of the work you did (the wall, the bags loaded, the "
                              "painted room…) and send it here. Add a short caption if you like, e.g. "
                              "_Finished wall section B_.")
@@ -99,11 +99,14 @@ async def handle(phone: str, reply: whatsapp.Replier, *, text: str = "", button_
 
     if not lowered or lowered in _MENU_WORDS:
         day = attendance.get_day(worker["worker_id"], today)
-        status = f"Today you're marked *{STATUS_LABELS[day['status']]}*." if day else "You haven't checked in today."
+        if attendance.has_check_in_proof(worker["worker_id"], today):
+            status = f"You're checked in today (*{STATUS_LABELS[day['status']]}*)."
+        else:
+            status = "You haven't checked in today."
         await reply.buttons(f"👋 Hello {first}! {status}\n\nWhat would you like to do?", MENU)
         return
 
-    if not attendance.is_checked_in(worker["worker_id"], today):
+    if not attendance.has_check_in_proof(worker["worker_id"], today):
         await _ask_for_missing(worker, today, reply, intro="You haven't checked in today.")
         return
 
@@ -156,10 +159,10 @@ async def _ask_for_missing(worker: dict, today: str, reply: whatsapp.Replier, in
 
 async def _start_check_in(worker: dict, today: str, reply: whatsapp.Replier) -> None:
     first = worker["name"].split()[0]
-    day = attendance.get_day(worker["worker_id"], today)
-    if day:
-        await reply.buttons(f"✅ You're already on today's register as *{STATUS_LABELS[day['status']]}*, "
-                            f"{first}.\n\nYou can still send work photos during the day.", [BTN_PHOTO, BTN_PAY])
+    if attendance.has_check_in_proof(worker["worker_id"], today):
+        day = attendance.get_day(worker["worker_id"], today)
+        await reply.buttons(f"✅ You're already checked in today, {first} (*{STATUS_LABELS[day['status']]}*)."
+                            "\n\nYou can still send work photos during the day.", [BTN_PHOTO, BTN_PAY])
         return
     await _ask_for_missing(worker, today, reply, intro=f"👷 OK {first}, let's check you in.")
 
@@ -168,17 +171,18 @@ async def _complete_if_ready(worker: dict, today: str, reply: whatsapp.Replier) 
     pending = _pending(worker, today)
     if not (pending.get("location") and pending.get("photo_evidence_id")):
         return False
-    attendance.worker_check_in(worker, today, pending["location"], pending["photo_evidence_id"])
+    result = attendance.worker_check_in(worker, today, pending["location"], pending["photo_evidence_id"])
     _clear_pending(worker)
     first = worker["name"].split()[0]
-    await reply.buttons(f"✅ *Checked in*, {first}. Location and photo received. You're marked "
-                        "*Present* for today.\n\nSend more work photos during or after the job.",
+    label = STATUS_LABELS[result["day"]["status"]]
+    await reply.buttons(f"✅ *Checked in*, {first}. Location and photo received. You're on today's "
+                        f"register as *{label}*.\n\nSend more work photos during or after the job.",
                         [BTN_PHOTO, BTN_PAY])
     return True
 
 
 async def _location(worker: dict, today: str, location: dict, reply: whatsapp.Replier) -> None:
-    if attendance.is_checked_in(worker["worker_id"], today):
+    if attendance.has_check_in_proof(worker["worker_id"], today):
         attendance.worker_check_in(worker, today, location)  # only updates the location
         await reply.text("📍 Location updated for today.")
         return
@@ -205,7 +209,7 @@ async def _photo(worker: dict, today: str, image_bytes: bytes, caption: str,
     elif "duplicate_same_day" in ev["flags"]:
         warnings.append("ℹ️ This looks the same as a photo you already sent today.")
 
-    checked_in = attendance.is_checked_in(worker["worker_id"], today)
+    checked_in = attendance.has_check_in_proof(worker["worker_id"], today)
     purpose = "work" if checked_in else "check_in"
     if checked_in:
         count = len([e for e in evidence.for_worker_day(worker["worker_id"], today) if e["kind"] == "photo"])

@@ -358,3 +358,28 @@ def test_pay_one_worker_then_the_rest(client):
     assert len(r["batches"]) == 2
     assert sorted(r["batches"][1]["worker_ids"]) == sorted([b["worker_id"], c["worker_id"]])
     assert client.post(f"/api/payruns/{run['run_id']}/pay", headers=h).status_code == 422
+
+
+def test_check_in_still_asks_for_proof_when_day_already_exists(client):
+    """A day logged without proof (dashboard, or an old record) must still ask
+    the worker for location + photo, and attach them without changing pay."""
+    import attendance
+    h, site = signup(client)
+    w = add_worker(client, h, site, "Musa Abdullahi", "08030000001", 12000, "musa@personal.example.com")
+    t = attendance.today()
+    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+
+    r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"button_id": "check_in"})
+    ask = r.json()["messages"][-1]["text"]
+    assert "location" in ask and "photo" in ask
+    r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"text": "hi"})
+    assert "haven't checked in" in r.json()["messages"][-1]["text"]
+
+    client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"lat": "6.45", "lon": "3.47"})
+    r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, files={"file": ("s.jpg", photo(), "image/jpeg")})
+    assert "Checked in" in r.json()["messages"][-1]["text"]
+    day = attendance.get_day(w["worker_id"], t)
+    assert day["check_in_location"] and day["check_in_photo"] and day["status"] == "P"
+
+    r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"button_id": "check_in"})
+    assert "already checked in" in r.json()["messages"][-1]["text"]
