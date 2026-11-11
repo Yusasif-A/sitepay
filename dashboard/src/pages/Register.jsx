@@ -4,8 +4,9 @@ import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
-import { FLAG_TEXT, STATUS, addDays, money, prettyDate, todayIn } from '../lib/format'
+import { STATUS, addDays, money, prettyDate, todayIn } from '../lib/format'
 import EvidenceDrawer from './EvidenceDrawer'
+import { CheckBadge } from '../components/AiCheck'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
@@ -20,23 +21,28 @@ function StatusCell({ value }) {
   return <span className={`status-pill status-${value || 'none'}`}>{value || '–'}</span>
 }
 
+/** The register's evidence column: the AI verdict for the day, then the
+ *  one-line finding. Photos themselves are in the worker panel. */
 function EvidenceCell({ data, showAi }) {
-  const flags = data.flags || []
-  const summary = showAi ? data.evidence.find((e) => e.ai?.ok)?.ai.summary : ''
+  const check = data.check
+  const line = check?.work || check?.attendance || ''
   return (
     <div style={{ lineHeight: 1.3, paddingTop: 6 }}>
       <div className="row" style={{ gap: 6 }}>
-        <span>{data.photo_count ? `📸 ${data.photo_count}` : <span className="muted">no photo</span>}</span>
+        {showAi ? <CheckBadge check={check} compact /> :
+          <span>{data.photo_count ? `📸 ${data.photo_count}` : <span className="muted">no photo</span>}</span>}
         {data.ot_claim_hours > 0 && data.ot_claim_hours !== data.ot_hours && <span className="chip chip-warn">claims {data.ot_claim_hours}h OT</span>}
-        {flags.slice(0, 2).map((f) => <span key={f} className="chip chip-warn">{FLAG_TEXT[f] || f}</span>)}
+        {check?.state === 'issues' && <span className="small" style={{ color: 'var(--color-danger)' }}>{check.issues[0]}</span>}
       </div>
-      {summary && <div className="small muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{summary}</div>}
+      {showAi && line && <div className="small muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{line}</div>}
     </div>
   )
 }
 
 function ReviewCell({ data }) {
-  if (data.pay_run_id) return <span className="chip chip-ok">Paid run</span>
+  // A day in a pay run is approved and locked; it's only "paid" once PayPal
+  // has sent the money, which the Pay runs page shows per worker.
+  if (data.pay_run_id) return <span className="chip chip-neutral">🔒 Approved</span>
   if (!data.logged) return <span className="muted small">—</span>
   const map = { pending: ['chip-warn', 'Review'], accepted: ['chip-ok', 'Accepted'], needs_photo: ['chip-bad', 'Needs photo'] }
   const [cls, label] = map[data.review] || ['chip-neutral', data.review]
@@ -130,7 +136,7 @@ export default function Register() {
         const ot = ['P', 'H', 'OT'].includes(d.status) ? d.ot_hours * d.ot_rate : 0
         return Math.round(f * d.daily_rate + ot)
       }, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, currency)) },
-    { headerName: 'Evidence', flex: 1, minWidth: 240, cellRenderer: EvidenceCell,
+    { headerName: 'AI check', flex: 1, minWidth: 280, cellRenderer: EvidenceCell,
       cellRendererParams: { showAi: !!settings?.ai_enabled } },
     { headerName: 'Review', width: 120, cellRenderer: ReviewCell },
     { field: 'notes', headerName: 'Notes', width: 150, tooltipField: 'notes' },
@@ -170,7 +176,7 @@ export default function Register() {
       <div className="stat-grid">
         <div className="card stat-card"><div className="stat-label">On register</div><div className="stat-value">{logged.length}/{rows.length}</div></div>
         <div className="card stat-card"><div className="stat-label">Present / OT</div><div className="stat-value">{logged.filter((r) => ['P', 'OT'].includes(r.status)).length}</div></div>
-        <div className="card stat-card"><div className="stat-label">Waiting for review</div><div className="stat-value">{logged.filter((r) => r.review === 'pending' && !r.pay_run_id).length}</div></div>
+        <div className="card stat-card"><div className="stat-label">AI verified</div><div className="stat-value" style={{ color: 'var(--color-success)' }}>{logged.filter((r) => r.check?.state === 'verified').length}</div><div className="stat-sub">{logged.filter((r) => ['issues', 'no_proof'].includes(r.check?.state)).length} need a look</div></div>
         <div className="card stat-card"><div className="stat-label">Day's wages</div><div className="stat-value">{money(totalDay, currency)}</div></div>
       </div>
 

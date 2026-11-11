@@ -58,6 +58,15 @@ def _sample_photo(seed: int, kind: str) -> bytes:
             for x in range(-40 + off, 760, 80):
                 shade = rnd.randint(-15, 15)
                 d.rectangle([x + 60, y, x + 136, y + 26], fill=(175 + shade, 75 + shade, 55), outline=(200, 200, 190))
+    elif kind == "selfie":
+        # A figure in hard hat + hi-vis in front of a block frame.
+        d.rectangle([420, 120, 760, 430], fill=(185, 182, 172))
+        for y in range(140, 430, 40):
+            d.line([420, y, 760, y], fill=(150, 148, 140), width=3)
+        cx = 260 + rnd.randint(-30, 30)
+        d.ellipse([cx - 50, 170, cx + 50, 270], fill=(110, 70, 45))
+        d.pieslice([cx - 58, 140, cx + 58, 230], 180, 360, fill=(250, 200, 20))
+        d.rounded_rectangle([cx - 90, 270, cx + 90, 600], 30, fill=(200, 230, 40))
     elif kind == "Painter":
         split = rnd.randint(250, 600)
         d.rectangle([60, 60, split, 430], fill=(235, 230, 210))
@@ -94,15 +103,38 @@ def seed_for(supervisor_id: str) -> dict:
                 "status": status, "ot_hours": ot, "advance": adv, "notes": note, "review": "accepted",
             })
             if status != "A":
-                ev = evidence.add_photo(worker, day, _sample_photo(offset * 10 + len(worker["name"]), worker["trade"]),
+                trade = worker["trade"]
+                scene = {"Mason": "blockwork", "Painter": "painting", "Electrician": "electrical"}.get(trade, "other")
+                work_line = {
+                    "Mason": "Blockwork in progress: new wall courses laid with mortar joints.",
+                    "Painter": "Painting in progress: wall section has a fresh coat; rest still bare.",
+                    "Electrician": "Electrical work in progress: cable runs fixed along the wall.",
+                }.get(trade, "Labour on site: materials moved and stacked at the work area.")
+                ci = evidence.add_photo(worker, day, _sample_photo(offset * 10 + len(worker["name"]) + 500, "selfie"),
                                         "", source="demo")
-                evidence.set_ai(ev["evidence_id"], {
-                    "ok": True, "scene_type": {"Mason": "blockwork", "Painter": "painting",
-                                               "Electrician": "electrical"}.get(worker["trade"], "other"),
-                    "is_work_related": True, "progress": "work in progress visible",
-                    "summary": f"{worker['trade']} work visible on site; looks consistent with the day's task.",
+                evidence.set_purpose(ci["evidence_id"], "check_in")
+                evidence.set_ai(ci["evidence_id"], {
+                    "ok": True, "purpose": "check_in", "scene_type": scene, "is_work_related": True,
+                    "person_visible": True, "on_site": True, "work_status": "not_visible",
+                    "finding": f"Worker present on site: {trade.lower()} in PPE at the Lekki duplex site.",
+                    "summary": f"{trade} on site at the start of the day.", "progress": "",
+                    "visible_timestamp": "", "timestamp_date": None,
                     "image_quality": "good", "confidence": "medium", "flags": [], "demo": True,
                 })
+                wk = evidence.add_photo(worker, day, _sample_photo(offset * 10 + len(worker["name"]), trade),
+                                        "", source="demo")
+                evidence.set_ai(wk["evidence_id"], {
+                    "ok": True, "purpose": "work", "scene_type": scene, "is_work_related": True,
+                    "person_visible": False, "on_site": True, "work_status": "in_progress",
+                    "finding": work_line, "summary": work_line, "progress": "work in progress",
+                    "visible_timestamp": "", "timestamp_date": None,
+                    "image_quality": "good", "confidence": "medium", "flags": [], "demo": True,
+                })
+                get_db().attendance.update_one(
+                    {"worker_id": worker["worker_id"], "date": day},
+                    {"$set": {"check_in_location": {"lat": 6.4474 + offset * 0.0001, "lon": 3.4723},
+                              "check_in_photo": ci["evidence_id"], "check_in_at": accounts.now()}},
+                )
     return {"site": site, "workers": workers,
             "using_placeholder_emails": not receivers}
 

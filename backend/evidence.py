@@ -152,12 +152,16 @@ def set_purpose(evidence_id: str, purpose: str) -> None:
     get_db().evidence.update_one({"evidence_id": evidence_id}, {"$set": {"purpose": purpose}})
 
 
+_AI_FLAGS = {"unrelated", "not_on_site", "no_person", "timestamp_mismatch",
+             "quality_dark", "quality_blurry", "quality_too_far"}
+
+
 def set_ai(evidence_id: str, ai_result: dict) -> None:
-    update = {"ai": ai_result}
-    if ai_result.get("flags"):
-        doc = get_db().evidence.find_one({"evidence_id": evidence_id}, {"flags": 1})
-        merged = sorted(set((doc or {}).get("flags", [])) | set(ai_result["flags"]))
-        update["flags"] = merged
+    """Store the AI result. A re-run replaces the previous AI flags; the
+    deterministic ones (too dark, duplicate) are kept."""
+    doc = get_db().evidence.find_one({"evidence_id": evidence_id}, {"flags": 1})
+    kept = {f for f in (doc or {}).get("flags", []) if f not in _AI_FLAGS}
+    update = {"ai": ai_result, "flags": sorted(kept | set(ai_result.get("flags") or []))}
     get_db().evidence.update_one({"evidence_id": evidence_id}, {"$set": update})
 
 

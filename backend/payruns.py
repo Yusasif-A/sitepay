@@ -97,6 +97,7 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
         })
 
     total_net = sum(l["net"] for l in lines)
+    _attach_checks(supervisor_id, site_id, lines)
     return {
         "site": site,
         "start": start,
@@ -413,7 +414,26 @@ def get_run(supervisor_id: str, run_id: str) -> Optional[dict]:
     if not run:
         return None
     run["lines"] = [_public(l) for l in db.pay_lines.find({"run_id": run_id}).sort("worker_name", 1)]
+    _attach_checks(supervisor_id, run["site_id"], run["lines"])
     return run
+
+
+def _attach_checks(supervisor_id: str, site_id: str, lines: List[dict]) -> None:
+    """Give each pay line the AI check for its days, so the supervisor sees
+    the verdict next to the Pay button."""
+    import checks
+    dates = sorted({d for l in lines for d in l.get("dates", [])})
+    if not dates:
+        return
+    by_day = checks.checks_for(supervisor_id, site_id, dates)
+    for line in lines:
+        day_checks = [{**by_day[(line["worker_id"], d)], "date": d}
+                      for d in line.get("dates", []) if (line["worker_id"], d) in by_day]
+        line["check"] = checks.worker_period(day_checks)
+        latest = next((c for c in reversed(day_checks) if c.get("attendance") or c.get("work")), None)
+        line["check"]["latest"] = ({"date": latest["date"], "attendance": latest.get("attendance", ""),
+                                    "work": latest.get("work", ""), "state": latest["state"]}
+                                   if latest else None)
 
 
 def list_runs(supervisor_id: str) -> List[dict]:

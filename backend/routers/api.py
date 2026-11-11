@@ -20,6 +20,7 @@ import bot
 import config
 import evidence
 import payruns
+import checks
 import schedule
 import whatsapp
 from accounts import AccountError
@@ -197,6 +198,8 @@ def get_register(site_id: str, date: str, sid: str = Depends(require_supervisor)
             "photo_count": sum(1 for e in evs if e["kind"] == "photo"),
             "evidence": evs,
             "flags": flags,
+            "check": checks.day_check(rec, evs),
+            "accepted_check": rec.get("accepted_check") if rec else None,
         })
     return {"date": day, "rows": rows}
 
@@ -213,11 +216,14 @@ def get_register_range(site_id: str, start: str, end: str, sid: str = Depends(re
         if ev["kind"] == "photo":
             key = (ev["worker_id"], ev["date"])
             photo_counts[key] = photo_counts.get(key, 0) + 1
+    day_checks = checks.checks_for(sid, site_id, days)
     records = [{
         "worker_id": d["worker_id"], "date": d["date"], "status": d["status"],
         "ot_hours": d.get("ot_hours", 0), "advance": d.get("advance", 0), "notes": d.get("notes", ""),
         "review": d.get("review"), "pay_run_id": d.get("pay_run_id"),
         "photos": photo_counts.get((d["worker_id"], d["date"]), 0),
+        "check_state": day_checks.get((d["worker_id"], d["date"]), {}).get("state"),
+        "check_issues": day_checks.get((d["worker_id"], d["date"]), {}).get("issues", []),
     } for d in attendance.days_for_site(sid, site_id, days)]
     return {
         "workers": [{"worker_id": w["worker_id"], "name": w["name"], "trade": w.get("trade", ""),
@@ -274,7 +280,12 @@ class DayPatch(BaseModel):
 
 @router.put("/register/{worker_id}/{date}")
 def set_day(worker_id: str, date: str, body: DayPatch, sid: str = Depends(require_supervisor)):
-    return _guard(attendance.supervisor_set_day, sid, worker_id, date, body.model_dump(exclude_none=True))
+    fields = body.model_dump(exclude_none=True)
+    day = _guard(attendance.supervisor_set_day, sid, worker_id, date, fields)
+    if fields.get("review") == "accepted":
+        # Record what the AI check said when the supervisor accepted the day.
+        day["accepted_check"] = checks.snapshot_on_accept(worker_id, day["date"])
+    return day
 
 
 class BulkBody(BaseModel):
@@ -291,6 +302,8 @@ def bulk_set(body: BulkBody, sid: str = Depends(require_supervisor)):
     for wid in body.worker_ids:
         try:
             attendance.supervisor_set_day(sid, wid, body.date, {"status": body.status, "review": body.review})
+            if body.review == "accepted":
+                checks.snapshot_on_accept(wid, body.date)
             updated += 1
         except AccountError as e:
             skipped.append(str(e))
@@ -361,6 +374,32 @@ async def reanalyse(evidence_id: str, sid: str = Depends(require_supervisor)):
         raise HTTPException(status_code=404, detail="Photo not found")
     doc = evidence.get_db().evidence.find_one({"evidence_id": evidence_id}, {"purpose": 1, "date": 1, "text": 1})
     return await bot.summarise(evidence_id, doc.get("text", ""), "", doc.get("purpose", "work"), doc["date"])
+
+
+@router.post("/register/{worker_id}/{date}/ai-check")
+async def run_ai_check(worker_id: str, date: str, sid: str = Depends(require_supervisor)):
+    """Re-run the AI on every photo of one worker-day (e.g. photos sent
+    before the current checks existed) and return the fresh verdict."""
+    worker = accounts.get_worker(sid, worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    day = _guard(attendance.parse_date, date)
+    rec = attendance.get_day(worker_id, day)
+    photos = [e for e in evidence.for_worker_day(worker_id, day) if e["kind"] == "photo"]
+    if not photos:
+        raise HTTPException(status_code=422, detail="No photos for this day yet")
+    ci_id = (rec or {}).get("check_in_photo")
+    if not ci_id:
+        # Older records: treat the first photo of the day as the check-in photo.
+        ci_id = photos[0]["evidence_id"]
+        if rec:
+            evidence.get_db().attendance.update_one({"worker_id": worker_id, "date": day},
+                                                    {"$set": {"check_in_photo": ci_id}})
+    for ev in photos:
+        purpose = "check_in" if ev["evidence_id"] == ci_id else "work"
+        evidence.set_purpose(ev["evidence_id"], purpose)
+        await bot.summarise(ev["evidence_id"], ev.get("text", ""), worker.get("trade", ""), purpose, day)
+    return checks.day_check(attendance.get_day(worker_id, day), evidence.for_worker_day(worker_id, day))
 
 
 # ── Pay runs ─────────────────────────────────────────────────────────────────

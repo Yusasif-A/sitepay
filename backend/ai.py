@@ -96,7 +96,7 @@ A worker sent this photo on WhatsApp. It is one of two kinds (you'll be told whi
 - CHECK-IN photo: proves the worker is on site at the start of the day. Usually a selfie or a photo of the worker with the site behind them.
 - WORK photo: proves the work done, e.g. a wall built, blocks laid, a room painted, bags loaded. A person may or may not be in it.
 
-Describe what the photo shows so the supervisor can approve the day quickly. You do NOT decide pay and you never accuse anyone; you only describe what is visible.
+Your job is to CHECK the photo and give the supervisor a verdict they can act on: did the worker attend, and what work was done. You do NOT decide pay and you never accuse anyone.
 
 Return ONE JSON object, nothing else:
 {{
@@ -104,19 +104,32 @@ Return ONE JSON object, nothing else:
   "is_work_related": true/false,
   "person_visible": true/false,
   "on_site": true/false,
-  "progress": "one short phrase on visible work or progress, e.g. 'block wall about 7 courses high', 'multi-storey frame with scaffolding'",
-  "summary": "one plain sentence (max 25 words) a busy supervisor can read at a glance",
+  "work_status": "completed" | "in_progress" | "not_visible",
+  "finding": "the verdict in one line (max 18 words), see rules",
+  "progress": "one short phrase on the work, e.g. 'block wall about 8 courses high'",
+  "summary": "one plain sentence (max 25 words)",
   "visible_timestamp": "any date/time printed ON the photo itself (e.g. a camera stamp), exactly as shown, or empty string",
   "image_quality": "good" | "dark" | "blurry" | "too_far",
   "confidence": "high" | "medium" | "low"
 }}
 
+How to write "finding":
+- It is a verdict, not a description. Never start with "A photo", "The image", "This shows", "A man", "A mason taking".
+- CHECK-IN photo: say whether the worker is present on an active site and what proves it.
+  Good: "Worker present on site: hard hat and hi-vis at a multi-storey block building under construction."
+  Bad: "A mason taking a selfie in front of a building."
+- WORK photo: name the trade and the state of the work.
+  Good: "Blockwork completed: wall built to about 8 courses, joints filled, tools left on site."
+  Bad: "A newly constructed block wall with a hard hat in the foreground."
+- If you can't tell, say so plainly: "Can't confirm attendance: no worker visible and no site in view."
+
 Rules:
+- work_status: "completed" if a section of work looks finished, "in_progress" if work is clearly under way, "not_visible" if no work can be seen (normal for many check-in selfies).
 - on_site is true when the background clearly looks like a work site: buildings under construction, blocks, scaffolding, sand, tools, a farm or a loading yard.
 - is_work_related is false only if the photo clearly has nothing to do with site or farm work (a room at home, a screenshot, a meme, etc.).
 - visible_timestamp: copy only text actually printed on the image. Never guess a date from lighting or content.
 - Don't guess how many hours were worked or whether the worker stayed all day.
-- Use the worker's caption or trade as context, but don't repeat it as fact if the photo doesn't support it."""
+- Use the worker's caption or trade as context, but don't state it as fact if the photo doesn't support it."""
 
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
@@ -196,6 +209,10 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
         "is_work_related": parsed.get("is_work_related") is not False,
         "person_visible": person,
         "on_site": on_site,
+        "work_status": (str(parsed.get("work_status", "")).lower()
+                        if str(parsed.get("work_status", "")).lower() in ("completed", "in_progress", "not_visible")
+                        else "not_visible"),
+        "finding": str(parsed.get("finding", "") or parsed.get("summary", ""))[:200],
         "progress": str(parsed.get("progress", ""))[:160],
         "summary": str(parsed.get("summary", ""))[:300],
         "visible_timestamp": stamp,

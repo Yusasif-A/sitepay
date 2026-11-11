@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, fetchImageUrl } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
 import { FLAG_TEXT, STATUS, money, prettyDate } from '../lib/format'
+import AiCheck from '../components/AiCheck'
 
 function Photo({ ev, token, onOpen }) {
   const [url, setUrl] = useState('')
@@ -63,7 +64,8 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
               <span className="chip chip-warn">Worker claims {row.ot_claim_hours}h OT</span>}
           </div>
           <p className="small muted">
-            {row.checked_in ? 'Checked in on WhatsApp' : row.logged ? 'Logged on dashboard' : 'No check-in yet'}
+            {row.check?.state === 'no_proof' ? 'On the register without a WhatsApp check-in'
+              : row.checked_in ? 'Checked in on WhatsApp' : row.logged ? 'Logged on dashboard' : 'No check-in yet'}
           </p>
           {row.location && (
             <p className="small" style={{ marginTop: 6 }}>
@@ -79,48 +81,41 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
         {err && <div className="banner banner-error">{err}</div>}
         {msg && <div className="banner banner-success">{msg}</div>}
 
-        <h3 style={{ fontWeight: 800, margin: '8px 0 10px' }}>Photos ({photos.length})</h3>
-        {photos.length === 0 && <p className="muted small" style={{ marginBottom: 12 }}>No photos yet for this day.</p>}
-        {photos.map((ev) => (
-          <div key={ev.evidence_id} className="card panel" style={{ padding: 14 }}>
-            <div className="row" style={{ marginBottom: 8 }}>
-              <span className={`chip ${ev.purpose === 'check_in' ? 'chip-ok' : 'chip-neutral'}`}>
-                {ev.purpose === 'check_in' ? '✅ Check-in photo' : '🔨 Work photo'}
-              </span>
-              <span className="small muted">
-                {new Date(ev.created_at + (String(ev.created_at).endsWith('Z') ? '' : 'Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-            <div className="photo-grid" style={{ gridTemplateColumns: '1fr' }}>
-              <Photo ev={ev} token={token} onOpen={setZoom} />
-            </div>
-            {ev.text && <p className="small" style={{ marginTop: 8 }}>“{ev.text}”</p>}
-            {showAi && <div style={{ marginTop: 10 }}>
-              {ev.ai?.ok ? (
-                <>
-                  <p className="small"><strong>AI summary:</strong> {ev.ai.summary}</p>
-                  <p className="small muted">{ev.ai.scene_type} · {ev.ai.progress} · confidence {ev.ai.confidence}</p>
-                  <div className="row" style={{ marginTop: 6, gap: 6 }}>
-                    {ev.ai.on_site && <span className="chip chip-ok">On a work site</span>}
-                    {ev.purpose === 'check_in' && ev.ai.person_visible && <span className="chip chip-ok">Worker visible</span>}
-                    {ev.ai.visible_timestamp && (
-                      <span className={`chip ${ev.ai.timestamp_date === date ? 'chip-ok' : 'chip-warn'}`}>
-                        📅 Photo stamp: {ev.ai.visible_timestamp}{ev.ai.timestamp_date === date ? ' (matches)' : ''}
-                      </span>
-                    )}
+        {showAi && (
+          <AiCheck check={row.check} busy={busy === 'ai'}
+            onRerun={photos.length ? () => act('ai', async () => {
+              await api.post(`/api/register/${row.worker_id}/${date}/ai-check`, {}, token)
+              setMsg('AI check updated.')
+            }) : null} />
+        )}
+        {row.accepted_check && row.review === 'accepted' && (
+          <p className="small muted" style={{ marginTop: -8, marginBottom: 14 }}>
+            You accepted this day when the AI check said: <strong>{row.accepted_check.state.replace('_', ' ')}</strong>
+            {row.accepted_check.issues?.length ? ` (${row.accepted_check.issues.join(', ')})` : ''}.
+          </p>
+        )}
+
+        {photos.length > 0 && (
+          <>
+            <h3 className="small muted" style={{ fontWeight: 800, margin: '4px 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Evidence ({photos.length} photo{photos.length === 1 ? '' : 's'})
+            </h3>
+            <div className="photo-thumbs" style={{ marginBottom: 16 }}>
+              {photos.map((ev) => (
+                <div key={ev.evidence_id}>
+                  <Photo ev={ev} token={token} onOpen={setZoom} />
+                  <div className="cap">
+                    {ev.purpose === 'check_in' ? 'Check-in' : 'Work'} ·{' '}
+                    {new Date(ev.created_at + (String(ev.created_at).endsWith('Z') ? '' : 'Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {ev.text ? ` · “${ev.text}”` : ''}
+                    {(ev.flags || []).filter((f) => FLAG_TEXT[f]).map((f) => ` · ⚠ ${FLAG_TEXT[f]}`).join('')}
                   </div>
-                </>
-              ) : (
-                <p className="small muted">AI summary: {ev.ai ? ev.ai.reason : 'analysing…'}</p>
-              )}
-            </div>}
-            {ev.flags?.length > 0 && (
-              <div className="row" style={{ marginTop: 8 }}>
-                {ev.flags.map((f) => <span key={f} className="chip chip-warn">{FLAG_TEXT[f] || f}</span>)}
-              </div>
-            )}
-          </div>
-        ))}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {photos.length === 0 && <p className="muted small" style={{ marginBottom: 12 }}>No photos yet for this day.</p>}
 
         {notes.length > 0 && (
           <>

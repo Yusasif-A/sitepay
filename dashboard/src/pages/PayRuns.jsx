@@ -13,6 +13,32 @@ function counts(c) {
   return ['P', 'OT', 'H', 'L', 'A'].filter((k) => c[k]).map((k) => `${c[k]}${k}`).join(' · ') || '—'
 }
 
+/** AI check across a worker's days in the period, next to their Pay button. */
+function PeriodCheck({ check, days }) {
+  if (!check) return <span className="muted small">—</span>
+  const ok = check.verified
+  const bad = check.flagged
+  return (
+    <div style={{ minWidth: 190 }}>
+      <div className="row" style={{ gap: 6 }}>
+        {ok > 0 && <span className="chip chip-ok">✅ {ok}/{days} verified</span>}
+        {bad > 0 && <span className="chip chip-bad">⚠️ {bad} flagged</span>}
+        {!ok && !bad && <span className="chip chip-neutral">No AI proof</span>}
+      </div>
+      {check.flagged_days?.slice(0, 2).map((d) => (
+        <div key={d.date} className="small" style={{ color: 'var(--color-danger)', marginTop: 3 }}>
+          {prettyDate(d.date)}: {d.state === 'no_proof' ? 'no location or check-in photo' : d.issues.join(', ')}
+        </div>
+      ))}
+      {check.latest && (check.latest.work || check.latest.attendance) && (
+        <div className="small muted" style={{ marginTop: 3 }}>
+          {prettyDate(check.latest.date)}: {check.latest.work || check.latest.attendance}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function PayRuns() {
   const { token, me } = useAuth()
   const { site } = useOutletContext()
@@ -101,12 +127,13 @@ export default function PayRuns() {
             <>
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>Worker</th><th>Days</th><th>OT hrs</th><th>Gross</th><th>Advances</th><th>Net</th><th>PayPal</th><th></th></tr></thead>
+                  <thead><tr><th>Worker</th><th>Days</th><th>AI check</th><th>OT hrs</th><th>Gross</th><th>Advances</th><th>Net</th><th>PayPal</th></tr></thead>
                   <tbody>
                     {pending.map((l) => (
                       <tr key={l.worker_id}>
                         <td><strong>{l.worker_name}</strong><div className="small muted">{l.trade}</div></td>
                         <td>{counts(l.counts)}</td>
+                        <td><PeriodCheck check={l.check} days={l.days} /></td>
                         <td>{l.ot_hours || '—'}</td>
                         <td>{money(l.gross, cur)}</td>
                         <td>{l.advances ? `−${money(l.advances, cur)}` : '—'}</td>
@@ -115,7 +142,6 @@ export default function PayRuns() {
                           <div>{l.payout_amount} {preview.payout_currency}</div>
                           <div className="small muted">{l.paypal_email || <span style={{ color: 'var(--color-danger)' }}>no PayPal email</span>}</div>
                         </td>
-                        <td>{(l.pending_review + l.needs_photo) > 0 && <span className="chip chip-warn">{l.pending_review + l.needs_photo} to review</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -159,18 +185,18 @@ export default function PayRuns() {
 
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Worker</th><th>Days</th><th>Net</th><th>Payout</th><th>Status</th><th>Transaction</th><th>WhatsApp</th><th></th></tr></thead>
+              <thead><tr><th>Worker</th><th>Days</th><th>AI check</th><th>Net</th><th>Payout</th><th>Status</th><th>WhatsApp</th><th></th></tr></thead>
               <tbody>
                 {active.lines.map((l) => {
                   const canPay = l.net > 0 && ['NOT_SENT', 'FAILED'].includes(l.transaction_status)
                   return (
                     <tr key={l.worker_id}>
-                      <td><strong>{l.worker_name}</strong><div className="small muted">{l.dates.length} day(s) · {l.evidence_ids.length} evidence</div></td>
+                      <td><strong>{l.worker_name}</strong><div className="small muted">{l.dates.length} day(s)</div></td>
                       <td>{counts(l.counts)}</td>
+                      <td><PeriodCheck check={l.check} days={l.dates.length} /></td>
                       <td>{money(l.net, active.wage_currency)}</td>
                       <td>{l.payout_amount} {active.payout_currency}<div className="small muted">{l.paypal_email}</div></td>
-                      <td><Tx status={l.transaction_status} /></td>
-                      <td className="small">{l.transaction_id || '—'}</td>
+                      <td><Tx status={l.transaction_status} />{l.transaction_id && <div className="small muted">{l.transaction_id}</div>}</td>
                       <td>{l.notified ? <span className="chip chip-ok">Pay note sent</span> : <span className="muted small">—</span>}</td>
                       <td>
                         {canPay && (

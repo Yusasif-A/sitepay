@@ -1,0 +1,171 @@
+"""
+The AI check for one worker-day: a short checklist the supervisor reads
+before accepting the day or paying it.
+
+    ✅ Location shared                       (from the WhatsApp check-in)
+    ✅ Check-in photo                        (from the WhatsApp check-in)
+    ✅ Worker visible in check-in photo      (AI)
+    ✅ Check-in photo taken on a work site   (AI)
+    ✅ Photo date stamp matches the day      (AI, only if a stamp is printed)
+    ✅ Work photo sent
+    ✅ Work visible in work photo            (AI)
+    ✅ Fresh photos (not reused)             (duplicate check)
+
+The verdict is one of:
+
+    verified     every item passed
+    issues       at least one item failed (the failed items are listed)
+    pending      the AI is still reading a photo
+    unavailable  the AI could not read the photos (supervisor checks by eye)
+    no_proof     on the register but no location and no check-in photo
+    manual       logged by the supervisor on the dashboard, no WhatsApp proof
+    absent       marked absent; nothing to check
+
+The AI never accepts a day or moves money. The supervisor reads this and
+decides; when they accept a day, the verdict at that moment is saved with it.
+"""
+
+from collections import Counter
+from typing import Dict, List, Optional, Tuple
+
+import attendance
+import evidence
+
+STATE_LABELS = {
+    "verified": "AI verified",
+    "issues": "AI found issues",
+    "pending": "AI checking",
+    "unavailable": "AI unavailable",
+    "no_proof": "No check-in proof",
+    "manual": "Logged by supervisor",
+    "absent": "Absent",
+}
+
+
+def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
+    if not rec:
+        return {"state": "none", "label": "", "items": [], "issues": [], "summary": ""}
+    if rec.get("status") == "A":
+        return {"state": "absent", "label": STATE_LABELS["absent"], "items": [], "issues": [], "summary": ""}
+
+    photos = [e for e in evs if e.get("kind") == "photo"]
+    ci_id = rec.get("check_in_photo")
+    ci = next((e for e in photos if e["evidence_id"] == ci_id), None)
+    work = [e for e in photos if e["evidence_id"] != ci_id and e.get("purpose") != "check_in"]
+    location = rec.get("check_in_location")
+
+    items: List[dict] = []
+    pending = unavailable = False
+
+    def add(label: str, ok: bool, detail: str = "", source: str = "check"):
+        items.append({"label": label, "ok": bool(ok), "detail": detail, "source": source})
+
+    add("Location shared", bool(location),
+        f"{location['lat']:.5f}, {location['lon']:.5f}" if location else "")
+    add("Check-in photo", bool(ci))
+
+    if ci:
+        ai = ci.get("ai")
+        if ai is None:
+            pending = True
+        elif not ai.get("ok"):
+            unavailable = True
+        else:
+            add("Worker visible in check-in photo", ai.get("person_visible"), source="ai")
+            add("Check-in photo taken on a work site", ai.get("on_site") and ai.get("is_work_related"),
+                ai.get("summary", ""), source="ai")
+            if ai.get("visible_timestamp"):
+                add("Photo date stamp matches the day", ai.get("timestamp_date") == rec["date"],
+                    ai["visible_timestamp"], source="ai")
+
+    add("Work photo sent", bool(work), f"{len(work)} photo(s)" if work else "")
+    latest = work[-1] if work else None
+    if latest:
+        ai = latest.get("ai")
+        if ai is None:
+            pending = True
+        elif not ai.get("ok"):
+            unavailable = True
+        else:
+            add("Work visible in work photo", ai.get("is_work_related") and ai.get("on_site")
+                and ai.get("work_status") != "not_visible", ai.get("progress", ""), source="ai")
+
+    reused = [e for e in photos if "duplicate_other_day" in (e.get("flags") or [])]
+    if photos:
+        add("Fresh photos (not reused from another day)", not reused,
+            f"{len(reused)} reused" if reused else "")
+
+    issues = [i["label"] for i in items if not i["ok"]]
+    if not location and not ci:
+        state = "manual" if rec.get("source") == "dashboard" else "no_proof"
+    elif issues:
+        state = "issues"
+    elif pending:
+        state = "pending"
+    elif unavailable:
+        state = "unavailable"
+    else:
+        state = "verified"
+
+    summaries = []
+    attendance_finding = work_finding = ""
+    if ci and (ci.get("ai") or {}).get("ok"):
+        attendance_finding = ci["ai"].get("finding") or ci["ai"].get("summary", "")
+    if latest and (latest.get("ai") or {}).get("ok"):
+        work_finding = latest["ai"].get("finding") or latest["ai"].get("summary", "")
+    for f in (attendance_finding, work_finding):
+        if f:
+            summaries.append(f)
+    work_status = ((latest or {}).get("ai") or {}).get("work_status", "") if latest else ""
+    return {
+        "state": state,
+        "label": STATE_LABELS[state],
+        "items": items,
+        "issues": issues,
+        "summary": " · ".join(summaries),
+        "attendance": attendance_finding,
+        "work": work_finding,
+        "work_status": work_status,
+        "sample_data": any((e.get("ai") or {}).get("demo") for e in photos),
+    }
+
+
+def checks_for(supervisor_id: str, site_id: str, days: List[str]) -> Dict[Tuple[str, str], dict]:
+    """{(worker_id, date): check} for every register day of a site."""
+    by_day: Dict[Tuple[str, str], List[dict]] = {}
+    for ev in evidence.for_days(supervisor_id, site_id, days):
+        by_day.setdefault((ev["worker_id"], ev["date"]), []).append(ev)
+    return {
+        (rec["worker_id"], rec["date"]): day_check(rec, by_day.get((rec["worker_id"], rec["date"]), []))
+        for rec in attendance.days_for_site(supervisor_id, site_id, days)
+    }
+
+
+def counts(states: List[str]) -> Dict[str, int]:
+    return dict(Counter(s for s in states if s not in ("none",)))
+
+
+def snapshot_on_accept(worker_id: str, day: str) -> Optional[dict]:
+    """Save what the AI check said at the moment the supervisor accepted the
+    day, so the pay record shows whether it was accepted with issues."""
+    from accounts import now
+    from db import get_db
+    rec = attendance.get_day(worker_id, day)
+    if not rec:
+        return None
+    check = day_check(rec, evidence.for_worker_day(worker_id, day))
+    snap = {"state": check["state"], "issues": check["issues"], "at": now()}
+    get_db().attendance.update_one({"worker_id": worker_id, "date": day}, {"$set": {"accepted_check": snap}})
+    return snap
+
+
+def worker_period(day_checks: List[dict]) -> dict:
+    """Roll up a worker's days for the pay screen."""
+    c = counts([d["state"] for d in day_checks])
+    flagged = [d for d in day_checks if d["state"] in ("issues", "no_proof")]
+    return {
+        "counts": c,
+        "verified": c.get("verified", 0),
+        "flagged": len(flagged),
+        "flagged_days": [{"date": d["date"], "state": d["state"], "issues": d["issues"]} for d in flagged],
+    }
