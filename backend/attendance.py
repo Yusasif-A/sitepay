@@ -80,8 +80,10 @@ def _new_day(worker: dict, day: str, source: str) -> dict:
     }
 
 
-def worker_check_in(worker: dict, day: Optional[str] = None, location: Optional[dict] = None) -> dict:
-    """A worker says they're on site. Creates the day as Present if it doesn't
+def worker_check_in(worker: dict, day: Optional[str] = None, location: Optional[dict] = None,
+                    photo_evidence_id: Optional[str] = None) -> dict:
+    """Record a completed WhatsApp check-in (the bot only calls this once it
+    has BOTH a location and a photo). Creates the day as Present if it doesn't
     exist; never overrides a status the supervisor already set.
     Returns {"day": ..., "created": bool}."""
     day = day or today()
@@ -93,27 +95,36 @@ def worker_check_in(worker: dict, day: Optional[str] = None, location: Optional[
             update["check_in_at"] = now()
         if location:
             update["check_in_location"] = location
+        if photo_evidence_id:
+            update["check_in_photo"] = photo_evidence_id
         db.attendance.update_one({"_id": existing["_id"]}, {"$set": update})
         return {"day": get_day(worker["worker_id"], day), "created": False}
 
     doc = _new_day(worker, day, "whatsapp")
     doc["check_in_at"] = now()
     doc["check_in_location"] = location
+    doc["check_in_photo"] = photo_evidence_id
     db.attendance.insert_one(doc)
     return {"day": _public(doc), "created": True}
 
 
-def worker_claim_ot(worker: dict, hours: float, day: Optional[str] = None) -> dict:
-    """The worker claims overtime. Recorded as a claim the supervisor sees;
-    it does not change pay until the supervisor sets OT hours."""
+def is_checked_in(worker_id: str, day: str) -> bool:
+    """True once the worker completed check-in today, or the supervisor
+    logged the day on the dashboard."""
+    return get_db().attendance.count_documents({"worker_id": worker_id, "date": day}) > 0
+
+
+def worker_claim_ot(worker: dict, hours: float, day: Optional[str] = None) -> Optional[dict]:
+    """The worker claims overtime on a day they've checked in. Recorded as a
+    claim the supervisor sees; it does not change pay until the supervisor
+    sets OT hours. Returns None if they haven't checked in today."""
     hours = max(0.0, min(float(hours), MAX_OT_HOURS))
     day = day or today()
-    worker_check_in(worker, day)
-    get_db().attendance.update_one(
+    result = get_db().attendance.update_one(
         {"worker_id": worker["worker_id"], "date": day},
         {"$set": {"ot_claim_hours": hours, "updated_at": now()}},
     )
-    return get_day(worker["worker_id"], day)
+    return get_day(worker["worker_id"], day) if result.matched_count else None
 
 
 def supervisor_set_day(supervisor_id: str, worker_id: str, day: str, fields: dict) -> dict:

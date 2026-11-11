@@ -84,20 +84,44 @@ def test_full_demo_flow_simulated(client):
     asyncio.run(bot.handle("2349999999999", whatsapp.Replier("2349999999999", True), text="hi"))
     assert "isn't on a site crew" in whatsapp.chat_history("2349999999999")[-1]["text"]
 
-    # Worker: hi → menu; check in; photo; OT claim
+    # Worker: hi → menu; Check in alone must NOT mark Present
     r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"text": "hi"})
     assert r.json()["messages"][-1]["buttons"]
     r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"button_id": "check_in"})
-    assert "Present" in r.json()["messages"][-1]["text"]
+    ask = r.json()["messages"][-1]["text"]
+    assert "location" in ask and "photo" in ask
+    assert attendance.get_day(musa["worker_id"], today) is None
+    # Notes / OT claims before check-in are refused
+    r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"text": "2 hours overtime"})
+    assert "haven't checked in" in r.json()["messages"][-1]["text"]
+    assert attendance.get_day(musa["worker_id"], today) is None
+
+    # Location only → still not Present, asks for photo
+    r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"lat": "6.4474", "lon": "3.4723"})
+    assert "Send a photo" in r.json()["messages"][-1]["text"]
+    assert attendance.get_day(musa["worker_id"], today) is None
+
+    # Photo → now checked in with both
     r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"text": "Finished wall section B"},
                     files={"file": ("w.jpg", photo(), "image/jpeg")})
-    assert "Photo received (1 today)" in r.json()["messages"][-1]["text"]
+    assert "Checked in" in r.json()["messages"][-1]["text"]
+    day = attendance.get_day(musa["worker_id"], today)
+    assert day["status"] == "P" and day["check_in_location"] and day["check_in_photo"]
+
     r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, data={"text": "I did 2 hours overtime"})
     assert "2h overtime" in r.json()["messages"][-1]["text"]
 
     # Same photo again → duplicate flag
     r = client.post(f"/api/simulator/{musa['worker_id']}", headers=h, files={"file": ("w.jpg", photo(), "image/jpeg")})
     assert "same as a photo" in r.json()["messages"][-1]["text"]
+
+    # Other order for Chinedu: photo first, then location
+    r = client.post(f"/api/simulator/{chinedu['worker_id']}", headers=h,
+                    files={"file": ("c.jpg", photo((60, 120, 180), pattern=3), "image/jpeg")})
+    assert "Share your location" in r.json()["messages"][-1]["text"]
+    assert attendance.get_day(chinedu["worker_id"], today) is None
+    r = client.post(f"/api/simulator/{chinedu['worker_id']}", headers=h, data={"lat": "6.45", "lon": "3.47"})
+    assert "Checked in" in r.json()["messages"][-1]["text"]
 
     # Stored image has no EXIF
     ev = get_db().evidence.find_one({"worker_id": musa["worker_id"], "kind": "photo"})

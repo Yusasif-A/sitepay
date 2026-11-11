@@ -140,7 +140,8 @@ export default function Simulator() {
             <h2>Try the worker flow</h2>
             <ol className="small" style={{ paddingLeft: 18, lineHeight: 1.8 }}>
               <li>Send <code>hi</code>, then tap <strong>✅ Check in</strong></li>
-              <li>📎 attach a photo of work with a caption, e.g. <em>Finished wall section B</em></li>
+              <li>Tap 📍 to share location, then 📎 attach a site photo. Check-in needs <strong>both</strong></li>
+              <li>📎 Send more work photos with a caption, e.g. <em>Finished wall section B</em></li>
               <li>Send <code>2 hours overtime</code> to claim OT</li>
               <li>Open the <strong>Register</strong>: the row, photo and AI summary are there</li>
               <li>Approve & pay on <strong>Pay runs</strong>. The pay note arrives back here.</li>
