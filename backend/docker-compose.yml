@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    # Host port defaults to 5003 so it doesn't clash with Avalio (5001).
-    # Change with SITEPAY_HOST_PORT=xxxx in .env.
+    # Uses PORT from .env on both sides, like Avalio.
     ports:
-      - "${SITEPAY_HOST_PORT:-5003}:8000"
+      - "${PORT:-5001}:${PORT:-5001}"

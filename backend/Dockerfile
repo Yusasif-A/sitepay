@@ -8,5 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# PORT comes from .env (via docker-compose env_file), same as Avalio.
+ENV PORT=5001
+EXPOSE ${PORT}
+CMD uvicorn app:app --host 0.0.0.0 --port ${PORT}
