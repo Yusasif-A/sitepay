@@ -51,8 +51,10 @@ export default function PayRuns() {
     const run = await api.post('/api/payruns', { site_id: site.site_id, start, end }, token)
     setActive(run); await Promise.all([loadPreview(), loadRuns()])
   })
-  const pay = () => step('pay', async () => {
-    setActive(await api.post(`/api/payruns/${active.run_id}/pay`, {}, token)); await loadRuns()
+  // workerId = pay just that worker; omit to pay everyone still unpaid.
+  const pay = (workerId) => step(workerId ? `pay:${workerId}` : 'pay', async () => {
+    const body = workerId ? { worker_ids: [workerId] } : {}
+    setActive(await api.post(`/api/payruns/${active.run_id}/pay`, body, token)); await loadRuns()
   })
   const refresh = () => step('refresh', async () => {
     setActive(await api.post(`/api/payruns/${active.run_id}/refresh`, {}, token)); await loadRuns()
@@ -143,7 +145,7 @@ export default function PayRuns() {
       {active && (
         <div className="card panel">
           <div className="row" style={{ marginBottom: 6 }}>
-            <h2 style={{ margin: 0 }}>{active.status === 'approved' ? '2 · Send payout' : 'Pay run'} {active.run_id}</h2>
+            <h2 style={{ margin: 0 }}>{['approved', 'partial'].includes(active.status) ? '2 · Send payout' : 'Pay run'} {active.run_id}</h2>
             {active.simulated && <span className="chip chip-warn">SIMULATED</span>}
             <span className={`chip ${active.status === 'completed' ? 'chip-ok' : active.status === 'failed' ? 'chip-bad' : 'chip-warn'}`}>{active.status}</span>
             <span className="spacer" />
@@ -157,34 +159,52 @@ export default function PayRuns() {
 
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Worker</th><th>Days</th><th>Net</th><th>Payout</th><th>Status</th><th>Transaction</th><th>WhatsApp</th></tr></thead>
+              <thead><tr><th>Worker</th><th>Days</th><th>Net</th><th>Payout</th><th>Status</th><th>Transaction</th><th>WhatsApp</th><th></th></tr></thead>
               <tbody>
-                {active.lines.map((l) => (
-                  <tr key={l.worker_id}>
-                    <td><strong>{l.worker_name}</strong><div className="small muted">{l.dates.length} day(s) · {l.evidence_ids.length} evidence</div></td>
-                    <td>{counts(l.counts)}</td>
-                    <td>{money(l.net, active.wage_currency)}</td>
-                    <td>{l.payout_amount} {active.payout_currency}<div className="small muted">{l.paypal_email}</div></td>
-                    <td><Tx status={l.transaction_status} /></td>
-                    <td className="small">{l.transaction_id || '—'}</td>
-                    <td>{l.notified ? <span className="chip chip-ok">Pay note sent</span> : <span className="muted small">—</span>}</td>
-                  </tr>
-                ))}
+                {active.lines.map((l) => {
+                  const canPay = l.net > 0 && ['NOT_SENT', 'FAILED'].includes(l.transaction_status)
+                  return (
+                    <tr key={l.worker_id}>
+                      <td><strong>{l.worker_name}</strong><div className="small muted">{l.dates.length} day(s) · {l.evidence_ids.length} evidence</div></td>
+                      <td>{counts(l.counts)}</td>
+                      <td>{money(l.net, active.wage_currency)}</td>
+                      <td>{l.payout_amount} {active.payout_currency}<div className="small muted">{l.paypal_email}</div></td>
+                      <td><Tx status={l.transaction_status} /></td>
+                      <td className="small">{l.transaction_id || '—'}</td>
+                      <td>{l.notified ? <span className="chip chip-ok">Pay note sent</span> : <span className="muted small">—</span>}</td>
+                      <td>
+                        {canPay && (
+                          <button className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => pay(l.worker_id)}>
+                            {busy === `pay:${l.worker_id}` ? 'Sending…' : `💸 Pay ${l.worker_name.split(' ')[0]}`}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
 
-          <div className="row" style={{ marginTop: 16 }}>
-            {['approved', 'failed'].includes(active.status) && (
-              <button className="btn btn-primary" onClick={pay} disabled={!!busy}>
-                {busy === 'pay' ? 'Sending to PayPal…' : `💸 Pay ${active.total_payout} ${active.payout_currency} via PayPal`}
-              </button>
-            )}
-            {['submitted', 'submitting'].includes(active.status) && (
-              <button className="btn btn-secondary" onClick={refresh} disabled={!!busy}>{busy === 'refresh' ? 'Checking…' : '↻ Check PayPal status'}</button>
-            )}
-            {active.status === 'completed' && <span className="banner banner-success" style={{ margin: 0 }}>Paid. Workers got their pay note on WhatsApp.</span>}
-          </div>
+          {(() => {
+            const unpaid = active.lines.filter((l) => l.net > 0 && ['NOT_SENT', 'FAILED'].includes(l.transaction_status))
+            const inFlight = active.lines.some((l) => ['SUBMITTING', 'PENDING', 'ONHOLD'].includes(l.transaction_status))
+            const total = unpaid.reduce((s, l) => s + Number(l.payout_amount), 0).toFixed(2)
+            return (
+              <div className="row" style={{ marginTop: 16 }}>
+                {unpaid.length > 1 && (
+                  <button className="btn btn-primary" onClick={() => pay()} disabled={!!busy}>
+                    {busy === 'pay' ? 'Sending to PayPal…' : `💸 Pay all ${unpaid.length} · ${total} ${active.payout_currency}`}
+                  </button>
+                )}
+                {inFlight && (
+                  <button className="btn btn-secondary" onClick={refresh} disabled={!!busy}>{busy === 'refresh' ? 'Checking…' : '↻ Check PayPal status'}</button>
+                )}
+                {unpaid.length > 0 && <span className="small muted">Pay one worker with their button, or everyone left at once.</span>}
+                {active.status === 'completed' && <span className="banner banner-success" style={{ margin: 0 }}>Paid. Workers got their pay note on WhatsApp.</span>}
+              </div>
+            )
+          })()}
         </div>
       )}
 

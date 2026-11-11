@@ -221,7 +221,7 @@ def test_real_paypal_path_with_mock_transport(client, monkeypatch):
     run = client.post("/api/payruns", headers=h, json={"site_id": site, "start": y, "end": t}).json()
     assert run["simulated"] is False
     paid = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h).json()
-    assert sent["body"]["sender_batch_header"]["sender_batch_id"] == run["run_id"]
+    assert sent["body"]["sender_batch_header"]["sender_batch_id"] == run["run_id"] + "-1"
     assert sent["body"]["items"][0]["amount"] == {"value": "12.00", "currency": "USD"}
     assert "Site X" in sent["body"]["items"][0]["note"]
     assert paid["status"] == "completed" and paid["lines"][0]["transaction_id"] == "TX1"
@@ -322,3 +322,39 @@ def test_ai_stamp_date_parsing():
     assert ai._stamp_date("2026-11-11 07:14") == "2026-11-11"
     assert ai._stamp_date("11/11/2026") == "2026-11-11"
     assert ai._stamp_date("07:14 AM") is None
+
+
+def test_pay_one_worker_then_the_rest(client):
+    """Per-worker Pay button, then Pay all for whoever is left; nobody paid twice."""
+    import attendance
+    import whatsapp
+    h, site = signup(client)
+    a = add_worker(client, h, site, "Musa Abdullahi", "08030000001", 12000, "musa@personal.example.com")
+    b = add_worker(client, h, site, "Chinedu Okafor", "08030000002", 6500, "chinedu@personal.example.com")
+    c = add_worker(client, h, site, "Fatima Bello", "08030000003", 9000, "fatima@personal.example.com")
+    t = attendance.today()
+    for w in (a, b, c):
+        client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+    run = client.post("/api/payruns", headers=h, json={"site_id": site, "start": t, "end": t}).json()
+
+    # Pay only Musa
+    r = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h, json={"worker_ids": [a["worker_id"]]}).json()
+    lines = {l["worker_id"]: l for l in r["lines"]}
+    assert lines[a["worker_id"]]["transaction_status"] == "SUCCESS" and lines[a["worker_id"]]["notified"]
+    assert lines[b["worker_id"]]["transaction_status"] == "NOT_SENT"
+    assert lines[c["worker_id"]]["transaction_status"] == "NOT_SENT"
+    assert r["status"] == "partial"
+    assert "you've been paid" in whatsapp.chat_history(a["phone"])[-1]["text"]
+    assert not whatsapp.chat_history(b["phone"])
+
+    # Paying Musa again is refused
+    again = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h, json={"worker_ids": [a["worker_id"]]})
+    assert again.status_code == 422
+
+    # Pay all → only the two still unpaid go out
+    r = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h).json()
+    assert r["status"] == "completed"
+    assert all(l["transaction_status"] == "SUCCESS" for l in r["lines"])
+    assert len(r["batches"]) == 2
+    assert sorted(r["batches"][1]["worker_ids"]) == sorted([b["worker_id"], c["worker_id"]])
+    assert client.post(f"/api/payruns/{run['run_id']}/pay", headers=h).status_code == 422

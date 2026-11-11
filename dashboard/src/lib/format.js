@@ -47,6 +47,7 @@ export const FLAG_TEXT = {
 export const TX_STATUS = {
   NOT_SENT: { label: 'Not sent', tone: 'neutral' },
   NOTHING_DUE: { label: 'Nothing due', tone: 'neutral' },
+  SUBMITTING: { label: 'Sending', tone: 'warn' },
   PENDING: { label: 'Pending', tone: 'warn' },
   SUCCESS: { label: 'Paid', tone: 'ok' },
   UNCLAIMED: { label: 'Unclaimed', tone: 'warn' },

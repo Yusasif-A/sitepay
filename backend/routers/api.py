@@ -406,9 +406,16 @@ async def _refresh_and_notify(sid: str, run_id: str) -> dict:
     return run
 
 
+class PayBody(BaseModel):
+    # Leave out to pay everyone still unpaid in the run; give one id for a
+    # single worker's Pay button.
+    worker_ids: Optional[List[str]] = None
+
+
 @router.post("/payruns/{run_id}/pay")
-async def pay(run_id: str, sid: str = Depends(require_supervisor)):
-    await run_in_threadpool(_guard, payruns.pay, sid, run_id)
+async def pay(run_id: str, body: Optional[PayBody] = None, sid: str = Depends(require_supervisor)):
+    worker_ids = body.worker_ids if body else None
+    await run_in_threadpool(_guard, payruns.pay, sid, run_id, worker_ids)
     # Sandbox batches usually settle in seconds; one immediate refresh makes
     # the demo show SUCCESS without waiting for the next poll.
     try:

@@ -23,6 +23,8 @@ import secrets
 from datetime import date as date_cls
 from typing import List, Optional
 
+from pymongo import ReturnDocument
+
 import config
 import paypal
 from accounts import AccountError, get_site, list_workers, new_id, now
@@ -163,6 +165,8 @@ def approve(supervisor_id: str, site_id: str, start: str, end: str, worker_ids: 
         "simulated": simulate_mode(),
         "payout_batch_id": None,
         "batch_status": None,
+        "batches": [],
+        "batch_seq": 0,
         "error": None,
         "approved_at": now(),
         "submitted_at": None,
@@ -190,6 +194,7 @@ def approve(supervisor_id: str, site_id: str, start: str, end: str, worker_ids: 
             "sender_item_id": f"{run_id}-{line['worker_id']}"[:63],
             "note": pay_note_paypal(run, line),
             "payout_item_id": None,
+            "payout_batch_id": None,
             "transaction_id": None,
             "transaction_status": "NOT_SENT" if line["net"] > 0 else "NOTHING_DUE",
             "notified": False,
@@ -253,19 +258,64 @@ def _client():
     return _SimulatedPayPal() if simulate_mode() else paypal.get_client()
 
 
-def pay(supervisor_id: str, run_id: str) -> dict:
+_WAITING = ("NOT_SENT", "FAILED")
+_IN_FLIGHT = ("SUBMITTING", "PENDING", "ONHOLD")
+_OK = ("SUCCESS", "UNCLAIMED")
+
+
+def _recompute_status(run_id: str) -> None:
+    """Run status from its lines: approved → partial → submitted → completed."""
+    db = get_db()
+    statuses = [l["transaction_status"] for l in db.pay_lines.find({"run_id": run_id, "net": {"$gt": 0}},
+                                                                   {"transaction_status": 1})]
+    waiting = [s for s in statuses if s in _WAITING]
+    sent = [s for s in statuses if s not in _WAITING]
+    if not statuses or all(s in _OK for s in statuses):
+        status = "completed"
+    elif waiting and sent:
+        status = "partial"
+    elif waiting:
+        status = "failed" if "FAILED" in waiting else "approved"
+    elif any(s in _IN_FLIGHT for s in statuses):
+        status = "submitted"
+    else:
+        status = "failed"  # all final, but some items were returned or blocked
+    update = {"status": status}
+    if status == "completed":
+        update["completed_at"] = now()
+    db.pay_runs.update_one({"run_id": run_id}, {"$set": update})
+
+
+def pay(supervisor_id: str, run_id: str, worker_ids: Optional[List[str]] = None) -> dict:
+    """Send a PayPal Payouts batch for the run's unpaid lines: all of them, or
+    only `worker_ids` (one worker's Pay button). A line can only ever be in
+    one successful batch."""
     db = get_db()
     run = db.pay_runs.find_one({"supervisor_id": supervisor_id, "run_id": run_id})
     if not run:
         raise AccountError("Pay run not found")
-    if run["status"] not in ("approved", "failed"):
-        raise AccountError(f"This run is already {run['status']}")
 
-    lines = list(db.pay_lines.find({"run_id": run_id, "net": {"$gt": 0}}))
-    if not lines:
-        db.pay_runs.update_one({"_id": run["_id"]}, {"$set": {"status": "completed", "completed_at": now()}})
-        return get_run(supervisor_id, run_id)
+    query = {"run_id": run_id, "net": {"$gt": 0}, "transaction_status": {"$in": list(_WAITING)}}
+    if worker_ids is not None:
+        query["worker_id"] = {"$in": list(worker_ids)}
+    candidates = list(db.pay_lines.find(query))
+    if not candidates:
+        _recompute_status(run_id)
+        raise AccountError("Nothing left to pay" + (" for that worker" if worker_ids else " in this run"))
 
+    # Claim each line first, so a double click can't put it in two batches.
+    claimed = []
+    for line in candidates:
+        r = db.pay_lines.update_one({"_id": line["_id"], "transaction_status": line["transaction_status"]},
+                                    {"$set": {"transaction_status": "SUBMITTING", "error": None}})
+        if r.modified_count:
+            claimed.append(line)
+    if not claimed:
+        raise AccountError("Already being paid")
+
+    seq = db.pay_runs.find_one_and_update({"_id": run["_id"]}, {"$inc": {"batch_seq": 1}},
+                                          return_document=ReturnDocument.AFTER)["batch_seq"]
+    sender_batch_id = f"{run_id}-{seq}"  # PayPal rejects a reused id for 30 days
     items = [{
         "receiver": l["paypal_email"],
         "recipient_type": "EMAIL",
@@ -273,79 +323,81 @@ def pay(supervisor_id: str, run_id: str) -> dict:
         "currency": run["payout_currency"],
         "note": l["note"],
         "sender_item_id": l["sender_item_id"],
-    } for l in lines]
-
-    # Mark first so a double click can't start a second batch.
-    claimed = db.pay_runs.update_one(
-        {"_id": run["_id"], "status": run["status"]},
-        {"$set": {"status": "submitting", "error": None}},
-    )
-    if not claimed.modified_count:
-        raise AccountError("This run is already being paid")
+    } for l in claimed]
+    ids = [l["_id"] for l in claimed]
+    batch = {"sender_batch_id": sender_batch_id, "worker_ids": [l["worker_id"] for l in claimed],
+             "created_at": now(), "payout_batch_id": None, "batch_status": None, "error": None}
+    who = claimed[0]["worker_name"] if len(claimed) == 1 else f"{len(claimed)} workers"
 
     try:
         result = _client().create_payout(
-            sender_batch_id=run_id,  # PayPal rejects a reuse within 30 days, so no double pay
+            sender_batch_id=sender_batch_id,
             items=items,
             email_subject=f"You've been paid: {run['site_name']} ({run['label']})",
             email_message=f"{run['reference']}. Sent with SitePay.",
         )
     except paypal.PayPalError as e:
-        db.pay_runs.update_one({"_id": run["_id"]}, {"$set": {"status": "failed", "error": str(e)}})
-        logger.error(f"❌ Payout for {run_id} failed: {e} {e.details}")
+        db.pay_lines.update_many({"_id": {"$in": ids}}, {"$set": {"transaction_status": "FAILED", "error": str(e)}})
+        batch["error"] = str(e)
+        db.pay_runs.update_one({"_id": run["_id"]}, {"$push": {"batches": batch}, "$set": {"error": str(e)}})
+        _recompute_status(run_id)
+        logger.error(f"❌ Payout {sender_batch_id} ({who}) failed: {e} {e.details}")
         raise AccountError(str(e))
 
     header = result.get("batch_header", {})
-    db.pay_runs.update_one({"_id": run["_id"]}, {"$set": {
-        "status": "submitted",
-        "payout_batch_id": header.get("payout_batch_id"),
-        "batch_status": header.get("batch_status"),
-        "submitted_at": now(),
-    }})
-    db.pay_lines.update_many({"run_id": run_id, "net": {"$gt": 0}}, {"$set": {"transaction_status": "PENDING"}})
-    logger.info(f"💸 Payout batch {header.get('payout_batch_id')} submitted for {run_id}")
+    batch.update(payout_batch_id=header.get("payout_batch_id"), batch_status=header.get("batch_status"))
+    db.pay_lines.update_many({"_id": {"$in": ids}}, {"$set": {"transaction_status": "PENDING",
+                                                               "payout_batch_id": batch["payout_batch_id"]}})
+    db.pay_runs.update_one({"_id": run["_id"]}, {
+        "$push": {"batches": batch},
+        "$set": {"payout_batch_id": batch["payout_batch_id"], "batch_status": batch["batch_status"],
+                 "submitted_at": now(), "error": None},
+    })
+    _recompute_status(run_id)
+    logger.info(f"💸 Payout batch {batch['payout_batch_id']} ({who}) submitted for {run_id}")
     return get_run(supervisor_id, run_id)
 
 
 def refresh(supervisor_id: str, run_id: str) -> dict:
-    """Pull status from PayPal. Returns the run plus `newly_paid` lines whose
-    worker should now get a WhatsApp pay note."""
+    """Pull status from PayPal for every batch still in progress. Returns the
+    run plus `newly_paid` lines whose worker should now get a pay note."""
     db = get_db()
     run = db.pay_runs.find_one({"supervisor_id": supervisor_id, "run_id": run_id})
     if not run:
         raise AccountError("Pay run not found")
-    if not run.get("payout_batch_id"):
-        return {"run": get_run(supervisor_id, run_id), "newly_paid": []}
-
-    try:
-        batch = _client().get_payout(run["payout_batch_id"])
-    except paypal.PayPalError as e:
-        raise AccountError(f"Couldn't fetch status from PayPal: {e}")
+    batches = run.get("batches") or []
 
     newly_paid = []
-    for item in batch.get("items", []):
-        sender_item_id = (item.get("payout_item") or {}).get("sender_item_id")
-        line = db.pay_lines.find_one({"run_id": run_id, "sender_item_id": sender_item_id})
-        if not line:
+    for batch in batches:
+        if not batch.get("payout_batch_id") or batch.get("batch_status") in paypal.BATCH_FINAL:
             continue
-        status = item.get("transaction_status")
-        db.pay_lines.update_one({"_id": line["_id"]}, {"$set": {
-            "transaction_status": status,
-            "payout_item_id": item.get("payout_item_id"),
-            "transaction_id": item.get("transaction_id"),
-            "errors": item.get("errors"),
-        }})
-        # UNCLAIMED = money sent, receiver has no PayPal account yet. Still
-        # worth a pay note so the worker knows to claim it.
-        if status in paypal.ITEM_PAID | {"UNCLAIMED"} and not line.get("notified"):
-            newly_paid.append({**_public(line), "transaction_status": status})
+        try:
+            result = _client().get_payout(batch["payout_batch_id"])
+        except paypal.PayPalError as e:
+            raise AccountError(f"Couldn't fetch status from PayPal: {e}")
+        for item in result.get("items", []):
+            sender_item_id = (item.get("payout_item") or {}).get("sender_item_id")
+            line = db.pay_lines.find_one({"run_id": run_id, "sender_item_id": sender_item_id,
+                                          "payout_batch_id": batch["payout_batch_id"]})
+            if not line:
+                continue
+            status = item.get("transaction_status")
+            db.pay_lines.update_one({"_id": line["_id"]}, {"$set": {
+                "transaction_status": status,
+                "payout_item_id": item.get("payout_item_id"),
+                "transaction_id": item.get("transaction_id"),
+                "errors": item.get("errors"),
+            }})
+            # UNCLAIMED = money sent, receiver has no PayPal account yet. Still
+            # worth a pay note so the worker knows to claim it.
+            if status in _OK and not line.get("notified"):
+                newly_paid.append({**_public(line), "transaction_status": status})
+        batch["batch_status"] = result.get("batch_header", {}).get("batch_status")
 
-    batch_status = batch.get("batch_header", {}).get("batch_status")
-    update = {"batch_status": batch_status}
-    if batch_status in paypal.BATCH_FINAL:
-        update["status"] = "completed" if batch_status == "SUCCESS" else "failed"
-        update["completed_at"] = now()
-    db.pay_runs.update_one({"_id": run["_id"]}, {"$set": update})
+    if batches:
+        db.pay_runs.update_one({"_id": run["_id"]}, {"$set": {
+            "batches": batches, "batch_status": batches[-1].get("batch_status")}})
+    _recompute_status(run_id)
     return {"run": get_run(supervisor_id, run_id), "newly_paid": newly_paid}
 
 
