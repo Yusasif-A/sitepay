@@ -146,7 +146,7 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
               <button className="btn btn-secondary btn-sm" disabled={!!busy}
                 onClick={() => act('photo', async () => {
                   const r = await api.post(`/api/register/${row.worker_id}/${date}/request-photo`, {}, token)
-                  setMsg(r.delivered ? 'Asked on WhatsApp for a clearer photo.' : 'Marked “needs photo” (message is in the WhatsApp simulator).')
+                  setMsg(r.delivered ? 'Asked on WhatsApp for a clearer photo.' : 'Marked “needs photo”. The WhatsApp message could not be delivered (the worker must have messaged the bot in the last 24 hours).')
                 })}>
                 Request clearer photo
               </button>

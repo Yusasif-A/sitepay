@@ -7,7 +7,6 @@ import { Login, Signup } from './pages/Auth'
 import Register from './pages/Register'
 import PayRuns from './pages/PayRuns'
 import Crew from './pages/Crew'
-import Simulator from './pages/Simulator'
 import Sites from './pages/Sites'
 import SiteCalendar from './pages/SiteCalendar'
 
@@ -23,7 +22,6 @@ export default function App() {
           <Route path="calendar" element={<SiteCalendar />} />
           <Route path="pay" element={<PayRuns />} />
           <Route path="crew" element={<Crew />} />
-          <Route path="whatsapp" element={<Simulator />} />
           <Route path="sites" element={<Sites />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

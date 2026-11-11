@@ -7,7 +7,6 @@ const NAV = [
   { to: '/app/calendar', label: 'Site calendar' },
   { to: '/app/pay', label: 'Pay runs' },
   { to: '/app/crew', label: 'Crew' },
-  { to: '/app/whatsapp', label: 'WhatsApp simulator' },
   { to: '/app/sites', label: 'Sites' },
 ]
 
@@ -50,7 +49,7 @@ export default function DashboardLayout() {
               PayPal {s.paypal_simulated ? 'simulated' : s.paypal_env}
             </span>
             <span className={`chip ${s.whatsapp_live ? 'chip-ok' : 'chip-neutral'}`}>
-              WhatsApp {s.whatsapp_live ? 'live' : 'simulator'}
+              WhatsApp {s.whatsapp_live ? 'live' : 'off'}
             </span>
             <span className={styles.identity}>{me?.supervisor.name}</span>
           </div>

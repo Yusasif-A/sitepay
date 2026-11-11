@@ -100,7 +100,7 @@ export default function SiteCalendar() {
       const r = await api.post('/api/schedule', { site_id: site.site_id, ...form }, token)
       const w = data.workers.find((x) => x.worker_id === form.worker_id)
       setInfo(`${w?.name} scheduled for ${r.shifts.length} day(s). ` +
-        (r.delivered ? 'WhatsApp message sent ✓' : 'Message saved in the WhatsApp simulator (outside the 24-hour window or WhatsApp not live).'))
+        (r.delivered ? 'WhatsApp message sent ✓' : 'Saved, but the WhatsApp message was not delivered. The worker must have messaged the bot in the last 24 hours.'))
       setForm(null)
       await load()
     } catch (err) { setError(err.message) } finally { setSaving(false) }
