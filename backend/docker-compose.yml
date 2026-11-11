@@ -1,0 +1,11 @@
+services:
+  sitepay:
+    build: .
+    container_name: sitepay-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Host port defaults to 5003 so it doesn't clash with Avalio (5001).
+    # Change with SITEPAY_HOST_PORT=xxxx in .env.
+    ports:
+      - "${SITEPAY_HOST_PORT:-5003}:8000"
