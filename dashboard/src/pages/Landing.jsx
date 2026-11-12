@@ -17,12 +17,10 @@ export default function Landing() {
       <nav className={styles.nav}>
         <span className={styles.brand}><span className={styles.mark}>₦</span>SitePay</span>
         <div className="row">
-          {token ? <Link className="btn btn-primary" to="/app">Open dashboard</Link> : (
-            <>
-              <Link className="btn btn-secondary" to="/login">Sign in</Link>
-              <Link className="btn btn-primary" to="/signup">Get started</Link>
-            </>
-          )}
+          <Link className="btn btn-secondary" to="/login">Sign in</Link>
+          {token
+            ? <Link className="btn btn-primary" to="/app">Open dashboard</Link>
+            : <Link className="btn btn-primary" to="/signup">Get started</Link>}
         </div>
       </nav>
 
