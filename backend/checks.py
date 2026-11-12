@@ -27,9 +27,13 @@ decides; when they accept a day, the verdict at that moment is saved with it.
 
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
+import os
 
 import attendance
 import evidence
+
+# A check-in photo stamped after this time counts as late.
+LATE_AFTER = os.getenv("CHECK_IN_LATE_AFTER", "08:30")
 
 STATE_LABELS = {
     "verified": "AI verified",
@@ -78,6 +82,9 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
             if ai.get("visible_timestamp"):
                 add("Photo date stamp matches the day", ai.get("timestamp_date") == rec["date"],
                     ai["visible_timestamp"], source="ai")
+            arrived = ai.get("timestamp_time")
+            if arrived:
+                add(f"On time (before {LATE_AFTER})", arrived <= LATE_AFTER, f"photo stamped {arrived}", source="ai")
 
     add("Work photo sent", bool(work), f"{len(work)} photo(s)" if work else "")
     latest = work[-1] if work else None
@@ -90,15 +97,12 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
         else:
             add("Work visible in work photo", ai.get("is_work_related") and ai.get("on_site")
                 and ai.get("work_status") != "not_visible", ai.get("progress", ""), source="ai")
+            add("Work completed", ai.get("work_status") == "completed", source="ai")
 
     reused = [e for e in photos if "duplicate_other_day" in (e.get("flags") or [])]
     if photos:
         add("Fresh photos (not reused from another day)", not reused,
             f"{len(reused)} reused" if reused else "")
-    fake = [e for e in photos if (e.get("ai") or {}).get("ok") and (e["ai"].get("real_photo") is False)]
-    if photos:
-        add("Real photos (not drawings or screenshots)", not fake, f"{len(fake)} not real" if fake else "",
-            source="ai")
 
     issues = [i["label"] for i in items if not i["ok"]]
     if not location and not ci:
@@ -126,21 +130,24 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
     present_ok = bool(location) and bool(ci) and ok("Worker visible in check-in photo") is not False \
         and ok("Check-in photo taken on a work site") is not False \
         and ok("Photo date stamp matches the day") is not False
-    genuine_ok = ok("Fresh photos (not reused from another day)") is not False \
-        and ok("Real photos (not drawings or screenshots)") is not False
-    work_ok = bool(work) and ok("Work visible in work photo") is not False
+    late = ok(f"On time (before {LATE_AFTER})") is False
+    genuine_ok = ok("Fresh photos (not reused from another day)") is not False
+    work_ok = bool(work) and ok("Work visible in work photo") is not False and ok("Work completed") is not False
+    arrived = ((ci or {}).get("ai") or {}).get("timestamp_time")
 
     answers = [
-        {"q": "Present on site?", "ok": present_ok,
-         "a": (attendance_finding or "Location and check-in photo received.") if present_ok else
-              ("No location shared." if not location else "No check-in photo." if not ci else
-               attendance_finding or "Check-in photo doesn't prove attendance.")},
+        {"q": "Present on site?", "ok": present_ok and not late,
+         "a": (f"Present, but LATE: check-in photo stamped {arrived} (start {LATE_AFTER})." if present_ok and late else
+               (attendance_finding or "Location and check-in photo received.") if present_ok else
+               ("No location shared." if not location else "No check-in photo." if not ci else
+                attendance_finding or "Check-in photo doesn't prove attendance."))},
         {"q": "Photos genuine?", "ok": genuine_ok,
          "a": "Real phone photos, taken for this day." if genuine_ok else
-              ("Photo was reused from another day." if reused else "Photo looks edited, drawn or a screenshot.")},
+              "Photo was reused from another day."},
         {"q": "Work done?", "ok": work_ok,
          "a": (work_finding or "Work photo received.") if work_ok else
-              ("No work photo sent." if not work else work_finding or "No work visible in the photo.")},
+              ("No work photo sent." if not work else
+               f"NOT completed: {work_finding}" if work_finding else "No work visible in the photo.")},
     ]
     if state == "verified":
         verdict = "AI confirms: present on site, photos genuine, work done. Safe to approve."

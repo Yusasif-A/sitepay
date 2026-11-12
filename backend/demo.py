@@ -102,6 +102,9 @@ def seed_for(supervisor_id: str) -> dict:
             attendance.supervisor_set_day(supervisor_id, worker["worker_id"], day, {
                 "status": status, "ot_hours": ot, "advance": adv, "notes": note, "review": "accepted",
             })
+            # No generated photos: past days are logged by the supervisor.
+            # Real photos come only from WhatsApp.
+            continue
             if status != "A":
                 trade = worker["trade"]
                 scene = {"Mason": "blockwork", "Painter": "painting", "Electrician": "electrical"}.get(trade, "other")

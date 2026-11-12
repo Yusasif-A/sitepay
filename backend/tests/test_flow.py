@@ -413,22 +413,3 @@ def test_only_approved_days_are_paid_and_pay_now_is_one_click(client):
     # Chinedu is still waiting; Pay all pays only him
     r = client.post("/api/pay-now", headers=h, json={"site_id": site, "start": t, "end": t}).json()
     assert [l["worker_id"] for l in r["lines"]] == [b["worker_id"]]
-
-
-def test_today_examples_show_good_and_bad(client):
-    import attendance
-    h, _ = signup(client)
-    site = client.post("/api/demo/seed", headers=h).json()["site"]["site_id"]
-    r = client.post("/api/demo/today", headers=h, json={"site_id": site})
-    assert r.status_code == 200, r.text
-    t = attendance.today()
-    rows = {x["name"].split()[0]: x for x in client.get(f"/api/register?site_id={site}&date={t}", headers=h).json()["rows"]}
-    assert rows["Chinedu"]["check"]["state"] == "verified"
-    assert rows["Chinedu"]["check"]["verdict"].startswith("AI confirms")
-    assert rows["Fatima"]["check"]["state"] == "issues"
-    assert any(not a["ok"] for a in rows["Fatima"]["check"]["answers"])
-    assert rows["Ibrahim"]["status"] == "A"
-    assert not rows["Musa"]["logged"]
-    # Running it again doesn't overwrite anything
-    again = client.post("/api/demo/today", headers=h, json={"site_id": site}).json()
-    assert again["added"] == []

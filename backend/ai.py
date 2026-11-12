@@ -104,7 +104,6 @@ Return ONE JSON object, nothing else:
   "is_work_related": true/false,
   "person_visible": true/false,
   "on_site": true/false,
-  "real_photo": true/false,
   "work_status": "completed" | "in_progress" | "not_visible",
   "finding": "the verdict in one line (max 18 words), see rules",
   "progress": "one short phrase on the work, e.g. 'block wall about 8 courses high'",
@@ -125,8 +124,8 @@ How to write "finding":
 - If you can't tell, say so plainly: "Can't confirm attendance: no worker visible and no site in view."
 
 Rules:
-- real_photo is false when the image is a drawing, cartoon, illustration, screenshot, a photo of a screen, or clearly edited. A normal phone photo (even a selfie, or slightly blurry) is true.
-- work_status: "completed" if a section of work looks finished, "in_progress" if work is clearly under way, "not_visible" if no work can be seen (normal for many check-in selfies).
+- work_status: "completed" if the section shown is fully built: all courses laid with no gaps or missing blocks along the wall. A wall built to a level top with tools and leftover blocks around it is still "completed". "in_progress" only if blocks are clearly missing, there are gaps in the courses, or loose blocks are stacked on top unfinished. "not_visible" if no work can be seen (normal for many check-in selfies).
+- For a WORK photo, the finding must say plainly whether the work is completed or NOT completed, and what is missing.
 - on_site is true when the background clearly looks like a work site: buildings under construction, blocks, scaffolding, sand, tools, a farm or a loading yard.
 - is_work_related is false only if the photo clearly has nothing to do with site or farm work (a room at home, a screenshot, a meme, etc.).
 - visible_timestamp: copy only text actually printed on the image. Never guess a date from lighting or content.
@@ -135,6 +134,20 @@ Rules:
 
 _MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+
+def stamp_time(stamp: str) -> Optional[str]:
+    """'HH:MM' (24h) from a camera stamp like '07:14 AM', '12 PM' or '13:05'."""
+    s = (stamp or "").strip().lower()
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", s)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2) or 0)
+        if not (1 <= h <= 12 and mi < 60):
+            return None
+        h = (0 if h == 12 else h) + (12 if m.group(3) == "pm" else 0)
+        return f"{h:02d}:{mi:02d}"
+    m = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", s)
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
 
 
 def _stamp_date(stamp: str) -> Optional[str]:
@@ -190,13 +203,10 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
     quality = str(parsed.get("image_quality", "good")).lower()
     person = parsed.get("person_visible") is True
     on_site = parsed.get("on_site") is not False
-    real = parsed.get("real_photo") is not False
     stamp = str(parsed.get("visible_timestamp", "") or "").strip()[:40]
     stamp_date = _stamp_date(stamp) if stamp else None
 
     flags = []
-    if not real:
-        flags.append("not_real_photo")
     if parsed.get("is_work_related") is False:
         flags.append("unrelated")
     if not on_site:
@@ -214,7 +224,6 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
         "is_work_related": parsed.get("is_work_related") is not False,
         "person_visible": person,
         "on_site": on_site,
-        "real_photo": real,
         "work_status": (str(parsed.get("work_status", "")).lower()
                         if str(parsed.get("work_status", "")).lower() in ("completed", "in_progress", "not_visible")
                         else "not_visible"),
@@ -223,6 +232,7 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
         "summary": str(parsed.get("summary", ""))[:300],
         "visible_timestamp": stamp,
         "timestamp_date": stamp_date,
+        "timestamp_time": stamp_time(stamp) if stamp else None,
         "image_quality": quality,
         "confidence": str(parsed.get("confidence", "medium")).lower(),
         "flags": flags,

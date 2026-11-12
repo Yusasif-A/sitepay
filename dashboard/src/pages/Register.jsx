@@ -210,12 +210,6 @@ export default function Register() {
         ))}
         <button className="btn btn-secondary btn-sm" disabled={!selected.length} onClick={() => bulk({ review: 'accepted' })}>✓ Approve</button>
         <span className="spacer" />
-        {date === todayIn(settings) && rows.some((r) => !r.logged && r.name.split(' ')[0] !== 'Musa') && (
-          <button className="btn btn-secondary btn-sm" onClick={async () => {
-            try { await api.post('/api/demo/today', { site_id: site.site_id }, token) } catch (e) { setError(e.message) }
-            load()
-          }}>+ Add today's example check-ins</button>
-        )}
         <button className="btn btn-primary btn-sm" onClick={() => navigate(`/app/pay?start=${addDays(date, -6)}&end=${date}`)}>Go to pay →</button>
       </div>
 

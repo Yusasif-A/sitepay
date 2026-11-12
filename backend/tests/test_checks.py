@@ -27,12 +27,12 @@ def test_verified_day_gives_attendance_and_work_findings():
         _photo("EV-CI", "check_in", _ai(finding="Worker present on site: mason in hi-vis at a block building.",
                                         visible_timestamp="11 NOV 2026 07:14 AM", timestamp_date="2026-11-11",
                                         work_status="not_visible")),
-        _photo("EV-W", "work", _ai(person_visible=False, finding="Blockwork in progress: wall about 8 courses.")),
+        _photo("EV-W", "work", _ai(person_visible=False, work_status="completed", finding="Blockwork completed: wall built to 8 courses.")),
     ]
     c = checks.day_check(_rec(), evs)
     assert c["state"] == "verified" and not c["issues"]
     assert c["attendance"].startswith("Worker present on site")
-    assert c["work"].startswith("Blockwork in progress")
+    assert c["work"].startswith("Blockwork completed")
     labels = [i["label"] for i in c["items"]]
     assert "Location shared" in labels and "Photo date stamp matches the day" in labels
 
@@ -71,3 +71,25 @@ def test_missing_work_photo_is_an_issue_and_pending_ai_waits():
 
 def test_absent_day():
     assert checks.day_check(_rec(status="A"), [])["state"] == "absent"
+
+
+def test_late_check_in_and_unfinished_work_are_flagged():
+    evs = [
+        _photo("EV-CI", "check_in", _ai(finding="Worker present on site.", visible_timestamp="12 NOV 2026 12 PM",
+                                        timestamp_date="2026-11-11", timestamp_time="12:00", work_status="not_visible")),
+        _photo("EV-W", "work", _ai(person_visible=False, work_status="in_progress",
+                                   finding="Blockwork in progress: missing blocks on the top course.")),
+    ]
+    c = checks.day_check(_rec(), evs)
+    assert c["state"] == "issues"
+    present, _, work = c["answers"]
+    assert not present["ok"] and "LATE" in present["a"] and "12:00" in present["a"]
+    assert not work["ok"] and work["a"].startswith("NOT completed")
+
+
+def test_stamp_time():
+    import ai
+    assert ai.stamp_time("11 NOV 2026 07:14 AM") == "07:14"
+    assert ai.stamp_time("12 NOV 2026 12 PM") == "12:00"
+    assert ai.stamp_time("2026-11-11 13:05") == "13:05"
+    assert ai.stamp_time("12 NOV 2026") is None

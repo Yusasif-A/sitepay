@@ -521,17 +521,3 @@ async def sim_send(worker_id: str, text: str = Form(""), button_id: str = Form("
 def seed_demo(sid: str = Depends(require_supervisor)):
     import demo
     return demo.seed_for(sid)
-
-
-class TodayExamplesBody(BaseModel):
-    site_id: str
-
-
-@router.post("/demo/today")
-def demo_today(body: TodayExamplesBody, sid: str = Depends(require_supervisor)):
-    """Add today's example check-ins for the rest of the crew (one verified,
-    one flagged, one absent). Never touches a day that already exists."""
-    import demo
-    if not accounts.get_site(sid, body.site_id):
-        raise HTTPException(status_code=404, detail="Site not found")
-    return demo.add_today_examples(sid, body.site_id)
