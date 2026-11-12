@@ -71,7 +71,7 @@ export default function PayRuns() {
       if (workerIds) body.worker_ids = workerIds
       const run = await api.post('/api/pay-now', body, token)
       const paid = run.lines.filter((l) => ['SUCCESS', 'UNCLAIMED', 'PENDING'].includes(l.transaction_status))
-      setDone(`Paid ${paid.map((l) => l.worker_name).join(', ')} via PayPal. Pay note sent on WhatsApp.`)
+      setDone(`Sent ${paid.map((l) => l.worker_name).join(', ')}'s pay to PayPal. It shows Paid here in a few seconds, and the pay note goes to WhatsApp.`)
       await load()
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
@@ -79,7 +79,25 @@ export default function PayRuns() {
   // Lines from earlier runs (paid, or approved before this screen existed).
   const paidLines = runs.flatMap((r) => (r.lines || []).map((l) => ({ ...l, run: r })))
   const cur = preview?.wage_currency || me?.settings.wage_currency || 'NGN'
-  const lines = preview?.lines || []
+  // Workers with nothing left to pay (already paid, or nothing approved) drop off the top table.
+  const lines = (preview?.lines || []).filter((l) => l.net > 0 || l.awaiting_approval > 0 || l.rejected_days > 0)
+
+  // PayPal confirms a payout a few seconds after it's sent. While any line is
+  // still on its way, ask PayPal again every 4s; that also sends the WhatsApp
+  // pay note once it's confirmed.
+  const inFlightRuns = [...new Set(paidLines
+    .filter((l) => ['SUBMITTING', 'PENDING', 'ONHOLD'].includes(l.transaction_status))
+    .map((l) => l.run.run_id))].join(',')
+  useEffect(() => {
+    if (!inFlightRuns) return
+    const t = setInterval(async () => {
+      for (const id of inFlightRuns.split(',')) {
+        try { await api.post(`/api/payruns/${id}/refresh`, {}, token) } catch { /* try again next tick */ }
+      }
+      load()
+    }, 4000)
+    return () => clearInterval(t)
+  }, [inFlightRuns, token, load])
   const payable = lines.filter((l) => l.net > 0 && l.paypal_email)
 
   return (

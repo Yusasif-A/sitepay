@@ -199,8 +199,15 @@ export default function SiteCalendar() {
           resources={resources}
           events={events}
           onEventClick={({ eventRecord }) => {
-            if (eventRecord.kind === 'shift') removeShift(eventRecord.shift)
-            else navigate(`/app?date=${eventRecord.day.date}`)
+            // The event id carries what we need ("shift|worker|date" or
+            // "day|worker|date"); custom fields on the record aren't reliable.
+            const [kind, workerId, iso] = String(eventRecord.id).split('|')
+            if (kind === 'shift') {
+              const shift = (data.shifts || []).find((s) => s.worker_id === workerId && s.date === iso)
+              if (shift) removeShift(shift)
+            } else if (iso) {
+              navigate(`/app?date=${iso}`)
+            }
           }}
           onScheduleDblClick={({ date, resourceRecord }) => {
             const iso = toIso(date)
