@@ -91,21 +91,29 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
 
         {!locked && row.logged && (
           <div className="row" style={{ marginBottom: 16 }}>
-            {row.review === 'accepted' ? (
+            {row.review === 'accepted' && (
               <span className="chip chip-ok" style={{ fontSize: '0.9rem', padding: '8px 14px' }}>✓ You approved this day</span>
-            ) : (
+            )}
+            {row.review === 'rejected' && (
+              <span className="chip chip-bad" style={{ fontSize: '0.9rem', padding: '8px 14px' }}>✗ You rejected this day. It won't be paid</span>
+            )}
+            {row.review !== 'accepted' && (
               <button className="btn btn-primary" disabled={!!busy}
                 onClick={() => act('accept', async () => { await save({ status: row.status || 'P', review: 'accepted' }); setMsg('Approved. This day is ready to pay.') })}>
                 {busy === 'accept' ? 'Approving…' : '✓ Confirm & approve'}
               </button>
             )}
-            {row.check?.state === 'issues' && row.review !== 'accepted' && (
-              <button className="btn btn-secondary" disabled={!!busy}
-                onClick={() => act('photo', async () => {
-                  const r = await api.post(`/api/register/${row.worker_id}/${date}/request-photo`, {}, token)
-                  setMsg(r.delivered ? 'Asked on WhatsApp for a new photo.' : 'Marked “needs photo”.')
-                })}>
-                Ask for a new photo
+            {row.review !== 'rejected' && row.review !== 'accepted' && (
+              <button className="btn btn-danger" disabled={!!busy}
+                onClick={() => {
+                  const reason = window.prompt("Reject this day? It won't be paid and the worker is told on WhatsApp.\n\nReason (optional):", row.check?.issues?.[0] || '')
+                  if (reason === null) return
+                  act('reject', async () => {
+                    const r = await api.post(`/api/register/${row.worker_id}/${date}/reject`, { reason }, token)
+                    setMsg(r.delivered ? 'Rejected. The worker was told on WhatsApp.' : 'Rejected. This day will not be paid.')
+                  })
+                }}>
+                {busy === 'reject' ? 'Rejecting…' : '✗ Reject'}
               </button>
             )}
           </div>

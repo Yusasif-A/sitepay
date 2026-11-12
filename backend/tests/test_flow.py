@@ -413,3 +413,24 @@ def test_only_approved_days_are_paid_and_pay_now_is_one_click(client):
     # Chinedu is still waiting; Pay all pays only him
     r = client.post("/api/pay-now", headers=h, json={"site_id": site, "start": t, "end": t}).json()
     assert [l["worker_id"] for l in r["lines"]] == [b["worker_id"]]
+
+
+def test_reject_day_is_not_paid_and_worker_is_told(client):
+    import attendance
+    import whatsapp
+    h, site = signup(client)
+    w = add_worker(client, h, site, "Chinedu Okafor", "08030000002", 6500, "chinedu@personal.example.com")
+    t = attendance.today()
+    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+    r = client.post(f"/api/register/{w['worker_id']}/{t}/reject", headers=h, json={"reason": "Checked in late"})
+    assert r.status_code == 200, r.text
+    assert attendance.get_day(w["worker_id"], t)["review"] == "rejected"
+    msg = whatsapp.chat_history(w["phone"])[-1]["text"]
+    assert "not approved" in msg and "Checked in late" in msg
+    prev = client.get(f"/api/payruns/preview?site_id={site}&start={t}&end={t}", headers=h).json()
+    line = prev["lines"][0]
+    assert line["net"] == 0 and line["rejected_days"] == 1 and line["awaiting_approval"] == 0
+    # Supervisor can still change their mind
+    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"review": "accepted"})
+    prev = client.get(f"/api/payruns/preview?site_id={site}&start={t}&end={t}", headers=h).json()
+    assert prev["lines"][0]["net"] == 6500

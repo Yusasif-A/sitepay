@@ -81,7 +81,8 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
         # Only days the supervisor approved are paid. Absent days count for
         # the summary but pay nothing, so they don't need approving.
         unpaid = [d for d in unpaid_all if d.get("review") == "accepted" or d.get("status") == "A"]
-        waiting = [d for d in unpaid_all if d not in unpaid]
+        rejected = [d for d in unpaid_all if d.get("review") == "rejected"]
+        waiting = [d for d in unpaid_all if d not in unpaid and d not in rejected]
         already_paid = len(worker_days) - len(unpaid_all)
         if not unpaid_all and not already_paid:
             continue
@@ -95,6 +96,7 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
             "already_paid_days": already_paid,
             "awaiting_approval": len(waiting),
             "awaiting_dates": sorted(d["date"] for d in waiting),
+            "rejected_days": len(rejected),
             "pending_review": 0,
             "needs_photo": 0,
             "dates": sorted(d["date"] for d in unpaid),

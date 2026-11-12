@@ -71,8 +71,8 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
 
     if ci:
         ai = ci.get("ai")
-        if ai is None:
-            pending = True
+        if ai is None or (ai.get("ok") and "work_status" not in ai):
+            pending = True  # not read yet, or read before the current checks: needs a re-check
         elif not ai.get("ok"):
             unavailable = True
         else:
@@ -90,7 +90,7 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
     latest = work[-1] if work else None
     if latest:
         ai = latest.get("ai")
-        if ai is None:
+        if ai is None or (ai.get("ok") and "work_status" not in ai):
             pending = True
         elif not ai.get("ok"):
             unavailable = True

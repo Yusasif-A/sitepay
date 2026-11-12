@@ -22,7 +22,7 @@ from accounts import AccountError, get_worker, now
 from db import get_db
 from payroll import MAX_OT_HOURS, STATUSES
 
-REVIEW_STATES = ("pending", "accepted", "needs_photo")
+REVIEW_STATES = ("pending", "accepted", "rejected", "needs_photo")
 
 
 class LockedError(AccountError):

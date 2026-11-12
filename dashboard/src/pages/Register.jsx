@@ -44,15 +44,17 @@ function EvidenceCell({ data, showAi }) {
   )
 }
 
-function ReviewCell({ data, onApprove }) {
+function ReviewCell({ data, onApprove, onReject }) {
   if (data.pay_run_id) return <span className="chip chip-ok">✓ Approved</span>
   if (!data.logged) return <span className="muted small">—</span>
   if (data.review === 'accepted') return <span className="chip chip-ok">✓ Approved</span>
+  if (data.review === 'rejected') return <span className="chip chip-bad">✗ Rejected</span>
   if (data.status === 'A') return <span className="muted small">—</span>
   return (
-    <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onApprove(data) }}>
-      ✓ Approve
-    </button>
+    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+      <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onApprove(data) }}>✓ Approve</button>
+      <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); onReject(data) }}>✗ Reject</button>
+    </div>
   )
 }
 
@@ -115,6 +117,15 @@ export default function Register() {
     load()
   }
 
+  async function rejectRow(d) {
+    const reason = window.prompt(`Reject ${d.name}'s day? They won't be paid for it and will be told on WhatsApp.\n\nReason (optional):`, d.check?.issues?.[0] || '')
+    if (reason === null) return
+    try {
+      await api.post(`/api/register/${d.worker_id}/${date}/reject`, { reason }, token)
+    } catch (err) { setError(err.message) }
+    load()
+  }
+
   async function runParse() {
     setParsed({ loading: true })
     try { setParsed(await api.post('/api/register/parse', { site_id: site.site_id, text: parseText }, token)) }
@@ -152,8 +163,8 @@ export default function Register() {
       }, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, currency)) },
     { headerName: 'AI check', flex: 1, minWidth: 280, cellRenderer: EvidenceCell,
       cellRendererParams: { showAi: !!settings?.ai_enabled } },
-    { headerName: 'Supervisor', width: 130, cellRenderer: ReviewCell,
-      cellRendererParams: { onApprove: (d) => approveRow(d) } },
+    { headerName: 'Supervisor', width: 200, cellRenderer: ReviewCell,
+      cellRendererParams: { onApprove: (d) => approveRow(d), onReject: (d) => rejectRow(d) } },
     { field: 'notes', headerName: 'Notes', width: 150, tooltipField: 'notes' },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [currency, settings?.ai_enabled, date])

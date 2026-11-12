@@ -327,6 +327,31 @@ async def request_photo(worker_id: str, date: str, body: NeedsPhotoBody, sid: st
     return {"ok": True, "delivered": delivered}
 
 
+class RejectBody(BaseModel):
+    reason: str = ""
+
+
+@router.post("/register/{worker_id}/{date}/reject")
+async def reject_day(worker_id: str, date: str, body: RejectBody, sid: str = Depends(require_supervisor)):
+    """Supervisor rejects the day: it is not paid, and the worker is told why
+    on WhatsApp. It can still be approved later if they sort it out."""
+    worker = accounts.get_worker(sid, worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    reason = body.reason.strip()[:200]
+    fields = {"review": "rejected"}
+    if reason:
+        fields["notes"] = f"Rejected: {reason}"
+    day = await run_in_threadpool(_guard, attendance.supervisor_set_day, sid, worker_id, date, fields)
+    await run_in_threadpool(checks.snapshot_on_accept, worker_id, day["date"])
+    text = (f"❌ *SitePay: day not approved*\n\nYour supervisor did not approve "
+            f"{payruns.period_label(day['date'], day['date'])}, so it won't be paid."
+            + (f"\n\nReason: _{reason}_" if reason else "")
+            + "\n\nIf this is a mistake, talk to your supervisor.")
+    delivered = await whatsapp.notify(worker["phone"], text)
+    return {"ok": True, "delivered": delivered, "day": day}
+
+
 class ParseBody(BaseModel):
     site_id: str
     text: str = Field(min_length=2, max_length=4000)

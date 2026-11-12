@@ -122,6 +122,11 @@ export default function PayRuns() {
                           <Link to={`/app?date=${l.awaiting_dates[0]}`}>approve on Register</Link>
                         </div>
                       )}
+                      {l.rejected_days > 0 && (
+                        <div className="small" style={{ color: 'var(--color-danger)', marginTop: 3 }}>
+                          {l.rejected_days} day(s) rejected, not paid
+                        </div>
+                      )}
                     </td>
                     <td><PeriodCheck check={l.check} days={l.days + (l.awaiting_approval || 0)} /></td>
                     <td><strong>{money(l.net, cur)}</strong><div className="small muted">≈ {l.payout_amount} {preview.payout_currency}</div></td>
