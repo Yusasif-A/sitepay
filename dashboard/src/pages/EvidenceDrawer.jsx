@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, fetchImageUrl } from '../lib/api'
 import { useAuth } from '../lib/AuthContext'
-import { FLAG_TEXT, STATUS, money, prettyDate } from '../lib/format'
+import { STATUS, money, prettyDate } from '../lib/format'
 import AiCheck from '../components/AiCheck'
 
 function Photo({ ev, token, onOpen }) {
@@ -75,7 +75,7 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
               </a>
             </p>
           )}
-          {locked && <div className="banner banner-info" style={{ marginTop: 12, marginBottom: 0 }}>In pay run {row.pay_run_id}. Locked.</div>}
+          {locked && <div className="banner banner-info" style={{ marginTop: 12, marginBottom: 0 }}>Approved and ready to pay (pay run {row.pay_run_id}).</div>}
         </div>
 
         {err && <div className="banner banner-error">{err}</div>}
@@ -88,19 +88,39 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
               setMsg('AI check updated.')
             }) : null} />
         )}
+
+        {!locked && row.logged && (
+          <div className="row" style={{ marginBottom: 16 }}>
+            {row.review === 'accepted' ? (
+              <span className="chip chip-ok" style={{ fontSize: '0.9rem', padding: '8px 14px' }}>✓ You approved this day</span>
+            ) : (
+              <button className="btn btn-primary" disabled={!!busy}
+                onClick={() => act('accept', async () => { await save({ status: row.status || 'P', review: 'accepted' }); setMsg('Approved. This day is ready to pay.') })}>
+                {busy === 'accept' ? 'Approving…' : '✓ Confirm & approve'}
+              </button>
+            )}
+            {row.check?.state === 'issues' && row.review !== 'accepted' && (
+              <button className="btn btn-secondary" disabled={!!busy}
+                onClick={() => act('photo', async () => {
+                  const r = await api.post(`/api/register/${row.worker_id}/${date}/request-photo`, {}, token)
+                  setMsg(r.delivered ? 'Asked on WhatsApp for a new photo.' : 'Marked “needs photo”.')
+                })}>
+                Ask for a new photo
+              </button>
+            )}
+          </div>
+        )}
         {row.accepted_check && row.review === 'accepted' && (
           <p className="small muted" style={{ marginTop: -8, marginBottom: 14 }}>
-            You accepted this day when the AI check said: <strong>{row.accepted_check.state.replace('_', ' ')}</strong>
+            Approved when the AI check said: <strong>{row.accepted_check.state.replace('_', ' ')}</strong>
             {row.accepted_check.issues?.length ? ` (${row.accepted_check.issues.join(', ')})` : ''}.
           </p>
         )}
 
         {photos.length > 0 && (
-          <>
-            <h3 className="small muted" style={{ fontWeight: 800, margin: '4px 0 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Evidence ({photos.length} photo{photos.length === 1 ? '' : 's'})
-            </h3>
-            <div className="photo-thumbs" style={{ marginBottom: 16 }}>
+          <details className="evidence-details">
+            <summary>📷 View evidence ({photos.length} photo{photos.length === 1 ? '' : 's'})</summary>
+            <div className="photo-thumbs" style={{ marginTop: 10 }}>
               {photos.map((ev) => (
                 <div key={ev.evidence_id}>
                   <Photo ev={ev} token={token} onOpen={setZoom} />
@@ -108,12 +128,11 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
                     {ev.purpose === 'check_in' ? 'Check-in' : 'Work'} ·{' '}
                     {new Date(ev.created_at + (String(ev.created_at).endsWith('Z') ? '' : 'Z')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     {ev.text ? ` · “${ev.text}”` : ''}
-                    {(ev.flags || []).filter((f) => FLAG_TEXT[f]).map((f) => ` · ⚠ ${FLAG_TEXT[f]}`).join('')}
                   </div>
                 </div>
               ))}
             </div>
-          </>
+          </details>
         )}
         {photos.length === 0 && <p className="muted small" style={{ marginBottom: 12 }}>No photos yet for this day.</p>}
 
@@ -125,39 +144,28 @@ export default function EvidenceDrawer({ row, date, currency, showAi, onClose, o
         )}
 
         {!locked && (
-          <div className="card panel">
-            <h2>Your decision</h2>
-            <div className="row" style={{ marginBottom: 12 }}>
-              <button className="btn btn-primary btn-sm" disabled={!!busy}
-                onClick={() => act('accept', async () => { await save({ status: row.status || 'P', review: 'accepted' }); setMsg('Accepted.') })}>
-                ✓ Accept
-              </button>
+          <details className="evidence-details">
+            <summary>More: overtime, note, upload</summary>
+            <div style={{ marginTop: 12 }}>
               {row.ot_claim_hours > 0 && row.ot_claim_hours !== row.ot_hours && (
-                <button className="btn btn-secondary btn-sm" disabled={!!busy}
+                <button className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} disabled={!!busy}
                   onClick={() => act('ot', () => save({ ot_hours: row.ot_claim_hours, review: 'accepted' }))}>
-                  Accept {row.ot_claim_hours}h OT
+                  Approve {row.ot_claim_hours}h overtime
                 </button>
               )}
-              <button className="btn btn-secondary btn-sm" disabled={!!busy}
-                onClick={() => act('photo', async () => {
-                  const r = await api.post(`/api/register/${row.worker_id}/${date}/request-photo`, {}, token)
-                  setMsg(r.delivered ? 'Asked on WhatsApp for a clearer photo.' : 'Marked “needs photo”. The WhatsApp message could not be delivered (the worker must have messaged the bot in the last 24 hours).')
-                })}>
-                Request clearer photo
-              </button>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label>Manual note</label>
+                <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+              </div>
+              <button className="btn btn-secondary btn-sm" disabled={!!busy || note === (row.notes || '')}
+                onClick={() => act('note', () => save({ notes: note }))}>Save note</button>
+              <hr style={{ border: 0, borderTop: '1px solid var(--color-border)', margin: '16px 0' }} />
+              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                {busy === 'upload' ? 'Uploading + checking…' : '⬆ Upload photo for this worker'}
+                <input type="file" accept="image/*" hidden onChange={upload} disabled={!!busy} />
+              </label>
             </div>
-            <div className="field" style={{ marginBottom: 10 }}>
-              <label>Manual note</label>
-              <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
-            </div>
-            <button className="btn btn-secondary btn-sm" disabled={!!busy || note === (row.notes || '')}
-              onClick={() => act('note', () => save({ notes: note }))}>Save note</button>
-            <hr style={{ border: 0, borderTop: '1px solid var(--color-border)', margin: '16px 0' }} />
-            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-              {busy === 'upload' ? 'Uploading + analysing…' : '⬆ Upload photo for this worker'}
-              <input type="file" accept="image/*" hidden onChange={upload} disabled={!!busy} />
-            </label>
-          </div>
+          </details>
         )}
 
         {zoom && (

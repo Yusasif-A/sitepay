@@ -77,9 +77,13 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
     lines = []
     for w in workers:
         worker_days = by_worker.get(w["worker_id"], [])
-        unpaid = [d for d in worker_days if not d.get("pay_run_id")]
-        already_paid = len(worker_days) - len(unpaid)
-        if not unpaid and not already_paid:
+        unpaid_all = [d for d in worker_days if not d.get("pay_run_id")]
+        # Only days the supervisor approved are paid. Absent days count for
+        # the summary but pay nothing, so they don't need approving.
+        unpaid = [d for d in unpaid_all if d.get("review") == "accepted" or d.get("status") == "A"]
+        waiting = [d for d in unpaid_all if d not in unpaid]
+        already_paid = len(worker_days) - len(unpaid_all)
+        if not unpaid_all and not already_paid:
             continue
         summary = summarise_worker(w, unpaid)
         lines.append({
@@ -89,8 +93,10 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
             "phone": w["phone"],
             "paypal_email": w.get("paypal_email", ""),
             "already_paid_days": already_paid,
-            "pending_review": sum(1 for d in unpaid if d.get("review") == "pending"),
-            "needs_photo": sum(1 for d in unpaid if d.get("review") == "needs_photo"),
+            "awaiting_approval": len(waiting),
+            "awaiting_dates": sorted(d["date"] for d in waiting),
+            "pending_review": 0,
+            "needs_photo": 0,
             "dates": sorted(d["date"] for d in unpaid),
             **summary,
             "payout_amount": to_payout_amount(summary["net"], config.PAYOUT_FX_RATE),
@@ -119,11 +125,11 @@ def preview(supervisor_id: str, site_id: str, start: str, end: str) -> dict:
 def approve(supervisor_id: str, site_id: str, start: str, end: str, worker_ids: Optional[List[str]] = None) -> dict:
     """Freeze the current register into an approved pay run."""
     draft = preview(supervisor_id, site_id, start, end)
-    lines = [l for l in draft["lines"] if l["days"] > 0]
+    lines = [l for l in draft["lines"] if l["days"] > 0 and l["net"] > 0]
     if worker_ids is not None:
         lines = [l for l in lines if l["worker_id"] in set(worker_ids)]
     if not lines:
-        raise AccountError("Nothing to approve: no unpaid days in this period")
+        raise AccountError("Nothing to pay: approve the worker's days on the Register first")
     blocked = [l["worker_name"] for l in lines if l["net"] > 0 and not l["paypal_email"]]
     if blocked:
         raise AccountError("Add a PayPal email for: " + ", ".join(blocked))
@@ -437,7 +443,11 @@ def _attach_checks(supervisor_id: str, site_id: str, lines: List[dict]) -> None:
 
 
 def list_runs(supervisor_id: str) -> List[dict]:
-    return [_public(r) for r in get_db().pay_runs.find({"supervisor_id": supervisor_id}).sort("approved_at", -1)]
+    db = get_db()
+    runs = [_public(r) for r in db.pay_runs.find({"supervisor_id": supervisor_id}).sort("approved_at", -1)]
+    for r in runs:
+        r["lines"] = [_public(l) for l in db.pay_lines.find({"run_id": r["run_id"]}).sort("worker_name", 1)]
+    return runs
 
 
 def runs_for_worker(worker_id: str, limit: int = 3) -> List[dict]:

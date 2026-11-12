@@ -139,6 +139,83 @@ def seed_for(supervisor_id: str) -> dict:
             "using_placeholder_emails": not receivers}
 
 
+def add_today_examples(supervisor_id: str, site_id: str) -> dict:
+    """Today's register for the other crew, to show the AI working both ways:
+
+        Chinedu   checked in, AI verifies him (good)
+        Fatima    checked in, AI flags her (reused photo, no work visible)
+        Ibrahim   absent
+
+    Musa (the worker demoing on WhatsApp) is left alone. Days that already
+    exist are never overwritten."""
+    today = attendance.today()
+    workers = {w["name"].split()[0]: w for w in accounts.list_workers(supervisor_id, site_id, active_only=True)}
+    done = []
+
+    def free(name):
+        w = workers.get(name)
+        return w if w and not attendance.get_day(w["worker_id"], today) else None
+
+    w = free("Chinedu")
+    if w:
+        attendance.supervisor_set_day(supervisor_id, w["worker_id"], today, {"status": "P", "review": "pending"})
+        get_db().attendance.update_one({"worker_id": w["worker_id"], "date": today}, {"$set": {"source": "whatsapp"}})
+        _demo_checkin(w, today, 21, good=True)
+        done.append("Chinedu: AI verified")
+
+    w = free("Fatima")
+    if w:
+        attendance.supervisor_set_day(supervisor_id, w["worker_id"], today, {"status": "P", "review": "pending"})
+        get_db().attendance.update_one({"worker_id": w["worker_id"], "date": today}, {"$set": {"source": "whatsapp"}})
+        _demo_checkin(w, today, 33, good=False)
+        done.append("Fatima: AI flagged")
+
+    w = free("Ibrahim")
+    if w:
+        attendance.supervisor_set_day(supervisor_id, w["worker_id"], today, {"status": "A", "review": "accepted",
+                                                                             "notes": "Did not check in"})
+        done.append("Ibrahim: absent")
+    return {"date": today, "added": done}
+
+
+def _demo_checkin(worker: dict, day: str, seed: int, good: bool) -> None:
+    trade = worker["trade"]
+    ci = evidence.add_photo(worker, day, _sample_photo(seed + 900, "selfie"), "", source="demo")
+    evidence.set_purpose(ci["evidence_id"], "check_in")
+    wk = evidence.add_photo(worker, day, _sample_photo(seed + 950, trade), "", source="demo")
+    if good:
+        ci_ai = {"person_visible": True, "on_site": True, "real_photo": True, "work_status": "not_visible",
+                 "finding": f"Worker present on site: {trade.lower()} in hard hat and hi-vis at the Lekki duplex."}
+        wk_ai = {"person_visible": False, "on_site": True, "real_photo": True, "work_status": "completed",
+                 "finding": "Work completed: blocks moved and stacked at the second-floor stairwell, area cleared."}
+        wk_flags = []
+    else:
+        ci_ai = {"person_visible": True, "on_site": True, "real_photo": True, "work_status": "not_visible",
+                 "finding": "Worker visible, but the same photo was sent on an earlier day."}
+        wk_ai = {"person_visible": False, "on_site": False, "real_photo": True, "work_status": "not_visible",
+                 "finding": "No work visible: photo shows a plain indoor wall, not the site."}
+        wk_flags = ["not_on_site"]
+    for ev_id, extra, flags in ((ci["evidence_id"], ci_ai, [] if good else ["duplicate_other_day"]),
+                                (wk["evidence_id"], wk_ai, wk_flags)):
+        # The drawn sample photos can look alike to the duplicate check;
+        # the example decides on purpose which one is "reused".
+        get_db().evidence.update_one({"evidence_id": ev_id},
+                                     {"$pull": {"flags": {"$in": ["duplicate_other_day", "duplicate_same_day"]}},
+                                      "$set": {"duplicate_of": None}})
+        evidence.set_ai(ev_id, {
+            "ok": True, "is_work_related": extra["on_site"], "progress": "", "summary": extra["finding"],
+            "visible_timestamp": "", "timestamp_date": None, "image_quality": "good", "confidence": "high",
+            "flags": [f for f in flags if f != "duplicate_other_day"], "demo": True, **extra,
+        })
+        if "duplicate_other_day" in flags:
+            get_db().evidence.update_one({"evidence_id": ev_id}, {"$addToSet": {"flags": "duplicate_other_day"}})
+    get_db().attendance.update_one(
+        {"worker_id": worker["worker_id"], "date": day},
+        {"$set": {"check_in_location": {"lat": 6.4474, "lon": 3.4723}, "check_in_photo": ci["evidence_id"],
+                  "check_in_at": accounts.now()}},
+    )
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("usage: python demo.py supervisor@email")

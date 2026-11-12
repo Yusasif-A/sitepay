@@ -17,7 +17,12 @@ const gridTheme = themeQuartz.withParams({
   rowHeight: 52,
 })
 
-function StatusCell({ value }) {
+function StatusCell({ value, data }) {
+  // A WhatsApp check-in the supervisor hasn't approved yet shows as "P?".
+  const unconfirmed = data && value && value !== 'A' && !data.pay_run_id && data.review !== 'accepted'
+  if (unconfirmed) {
+    return <span className="status-pill status-none" title="Waiting for your approval" style={{ border: '1.5px dashed #94a3b8' }}>{value}?</span>
+  }
   return <span className={`status-pill status-${value || 'none'}`}>{value || '–'}</span>
 }
 
@@ -39,14 +44,16 @@ function EvidenceCell({ data, showAi }) {
   )
 }
 
-function ReviewCell({ data }) {
-  // A day in a pay run is approved and locked; it's only "paid" once PayPal
-  // has sent the money, which the Pay runs page shows per worker.
-  if (data.pay_run_id) return <span className="chip chip-neutral">🔒 Approved</span>
+function ReviewCell({ data, onApprove }) {
+  if (data.pay_run_id) return <span className="chip chip-ok">✓ Approved</span>
   if (!data.logged) return <span className="muted small">—</span>
-  const map = { pending: ['chip-warn', 'Review'], accepted: ['chip-ok', 'Accepted'], needs_photo: ['chip-bad', 'Needs photo'] }
-  const [cls, label] = map[data.review] || ['chip-neutral', data.review]
-  return <span className={`chip ${cls}`}>{label}</span>
+  if (data.review === 'accepted') return <span className="chip chip-ok">✓ Approved</span>
+  if (data.status === 'A') return <span className="muted small">—</span>
+  return (
+    <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); onApprove(data) }}>
+      ✓ Approve
+    </button>
+  )
 }
 
 export default function Register() {
@@ -101,6 +108,13 @@ export default function Register() {
     load()
   }
 
+  async function approveRow(d) {
+    try {
+      await api.put(`/api/register/${d.worker_id}/${date}`, { status: d.status || 'P', review: 'accepted' }, token)
+    } catch (err) { setError(err.message) }
+    load()
+  }
+
   async function runParse() {
     setParsed({ loading: true })
     try { setParsed(await api.post('/api/register/parse', { site_id: site.site_id, text: parseText }, token)) }
@@ -138,9 +152,11 @@ export default function Register() {
       }, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, currency)) },
     { headerName: 'AI check', flex: 1, minWidth: 280, cellRenderer: EvidenceCell,
       cellRendererParams: { showAi: !!settings?.ai_enabled } },
-    { headerName: 'Review', width: 120, cellRenderer: ReviewCell },
+    { headerName: 'Supervisor', width: 130, cellRenderer: ReviewCell,
+      cellRendererParams: { onApprove: (d) => approveRow(d) } },
     { field: 'notes', headerName: 'Notes', width: 150, tooltipField: 'notes' },
-  ], [currency, settings?.ai_enabled])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [currency, settings?.ai_enabled, date])
 
   if (!me?.sites.length) {
     return (
@@ -192,9 +208,15 @@ export default function Register() {
             Mark {STATUS[s].label}
           </button>
         ))}
-        <button className="btn btn-secondary btn-sm" disabled={!selected.length} onClick={() => bulk({ review: 'accepted' })}>Accept</button>
+        <button className="btn btn-secondary btn-sm" disabled={!selected.length} onClick={() => bulk({ review: 'accepted' })}>✓ Approve</button>
         <span className="spacer" />
-        <button className="btn btn-primary btn-sm" onClick={() => navigate(`/app/pay?start=${date}&end=${date}`)}>Approve & pay this day →</button>
+        {date === todayIn(settings) && rows.some((r) => !r.logged && r.name.split(' ')[0] !== 'Musa') && (
+          <button className="btn btn-secondary btn-sm" onClick={async () => {
+            try { await api.post('/api/demo/today', { site_id: site.site_id }, token) } catch (e) { setError(e.message) }
+            load()
+          }}>+ Add today's example check-ins</button>
+        )}
+        <button className="btn btn-primary btn-sm" onClick={() => navigate(`/app/pay?start=${addDays(date, -6)}&end=${date}`)}>Go to pay →</button>
       </div>
 
       <div style={{ height: Math.min(560, 120 + rows.length * 52), minHeight: 260 }}>

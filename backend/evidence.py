@@ -152,7 +152,7 @@ def set_purpose(evidence_id: str, purpose: str) -> None:
     get_db().evidence.update_one({"evidence_id": evidence_id}, {"$set": {"purpose": purpose}})
 
 
-_AI_FLAGS = {"unrelated", "not_on_site", "no_person", "timestamp_mismatch",
+_AI_FLAGS = {"unrelated", "not_on_site", "no_person", "timestamp_mismatch", "not_real_photo",
              "quality_dark", "quality_blurry", "quality_too_far"}
 
 

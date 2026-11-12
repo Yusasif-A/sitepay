@@ -463,6 +463,21 @@ async def pay(run_id: str, body: Optional[PayBody] = None, sid: str = Depends(re
         return payruns.get_run(sid, run_id)
 
 
+class PayNowBody(BaseModel):
+    site_id: str
+    start: str
+    end: str
+    worker_ids: Optional[List[str]] = None  # leave out = everyone with approved days
+
+
+@router.post("/pay-now")
+async def pay_now(body: PayNowBody, sid: str = Depends(require_supervisor)):
+    """One click: take the approved days for these workers and send them to
+    PayPal. Used by the per-worker Pay buttons and Pay all."""
+    run = await run_in_threadpool(_guard, payruns.approve, sid, body.site_id, body.start, body.end, body.worker_ids)
+    return await pay(run["run_id"], None, sid)
+
+
 @router.post("/payruns/{run_id}/refresh")
 async def refresh(run_id: str, sid: str = Depends(require_supervisor)):
     return await _refresh_and_notify(sid, run_id)
@@ -506,3 +521,17 @@ async def sim_send(worker_id: str, text: str = Form(""), button_id: str = Form("
 def seed_demo(sid: str = Depends(require_supervisor)):
     import demo
     return demo.seed_for(sid)
+
+
+class TodayExamplesBody(BaseModel):
+    site_id: str
+
+
+@router.post("/demo/today")
+def demo_today(body: TodayExamplesBody, sid: str = Depends(require_supervisor)):
+    """Add today's example check-ins for the rest of the crew (one verified,
+    one flagged, one absent). Never touches a day that already exists."""
+    import demo
+    if not accounts.get_site(sid, body.site_id):
+        raise HTTPException(status_code=404, detail="Site not found")
+    return demo.add_today_examples(sid, body.site_id)

@@ -491,3 +491,19 @@ h1, h2, h3, h4, p {
 .photo-thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .photo-thumbs img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; border: 1px solid var(--color-border); cursor: zoom-in; }
 .photo-thumbs .cap { font-size: 0.72rem; color: var(--color-text-muted); margin-top: 3px; }
+.ai-verdict { font-size: 1rem; font-weight: 700; line-height: 1.4; margin-bottom: 12px; }
+.ai-answers { display: grid; gap: 8px; }
+.ai-answer { display: flex; gap: 10px; align-items: flex-start; background: rgba(255,255,255,0.7); border-radius: 10px; padding: 10px 12px; }
+.ai-answer-icon { font-weight: 900; font-size: 1.1rem; line-height: 1.2; }
+.ai-answer.ok .ai-answer-icon { color: var(--color-success); }
+.ai-answer.bad .ai-answer-icon { color: var(--color-danger); }
+.ai-answer-q { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.ai-answer-a { font-size: 0.9rem; line-height: 1.4; }
+.ai-answer.bad .ai-answer-a { color: var(--color-danger); font-weight: 600; }
+.evidence-details { margin-bottom: 16px; }
+.evidence-details summary {
+  cursor: pointer; font-weight: 700; font-size: 0.9rem; padding: 10px 14px;
+  border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); background: #fff; list-style: none;
+}
+.evidence-details summary::-webkit-details-marker { display: none; }
+.evidence-details[open] summary { border-color: var(--color-primary); }

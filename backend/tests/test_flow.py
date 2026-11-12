@@ -140,7 +140,7 @@ def test_full_demo_flow_simulated(client):
     r = client.put(f"/api/register/{musa['worker_id']}/{today}", headers=h, json={"ot_hours": 2, "review": "accepted"})
     assert r.json()["status"] == "OT"
     client.put(f"/api/register/{chinedu['worker_id']}/{today}", headers=h,
-               json={"status": "H", "advance": 1000, "notes": "Left 1pm"})
+               json={"status": "H", "advance": 1000, "notes": "Left 1pm", "review": "accepted"})
     assert client.put(f"/api/register/{chinedu['worker_id']}/{today}", headers=h,
                       json={"status": "X"}).status_code == 422
 
@@ -183,7 +183,7 @@ def test_approve_requires_paypal_email(client):
     import attendance
     h, site = signup(client)
     w = add_worker(client, h, site, "No Email", "08035555555", 5000, "")
-    client.put(f"/api/register/{w['worker_id']}/{attendance.today()}", headers=h, json={"status": "P"})
+    client.put(f"/api/register/{w['worker_id']}/{attendance.today()}", headers=h, json={"status": "P", "review": "accepted"})
     t = attendance.today()
     r = client.post("/api/payruns", headers=h, json={"site_id": site, "start": t, "end": t})
     assert r.status_code == 422 and "PayPal email" in r.json()["detail"]
@@ -217,7 +217,7 @@ def test_real_paypal_path_with_mock_transport(client, monkeypatch):
     t = attendance.today()
     y = (date.fromisoformat(t) - timedelta(days=1)).isoformat()
     for d in (y, t):
-        client.put(f"/api/register/{w['worker_id']}/{d}", headers=h, json={"status": "P"})
+        client.put(f"/api/register/{w['worker_id']}/{d}", headers=h, json={"status": "P", "review": "accepted"})
     run = client.post("/api/payruns", headers=h, json={"site_id": site, "start": y, "end": t}).json()
     assert run["simulated"] is False
     paid = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h).json()
@@ -246,7 +246,7 @@ def test_paypal_failure_allows_retry(client):
     h, site = signup(client)
     w = add_worker(client, h, site, "Ibrahim K", "08034444444", 15000, "ib@personal.example.com")
     t = attendance.today()
-    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P", "review": "accepted"})
     run = client.post("/api/payruns", headers=h, json={"site_id": site, "start": t, "end": t}).json()
     r = client.post(f"/api/payruns/{run['run_id']}/pay", headers=h)
     assert r.status_code == 422 and "enough balance" in r.json()["detail"]
@@ -334,7 +334,7 @@ def test_pay_one_worker_then_the_rest(client):
     c = add_worker(client, h, site, "Fatima Bello", "08030000003", 9000, "fatima@personal.example.com")
     t = attendance.today()
     for w in (a, b, c):
-        client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+        client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P", "review": "accepted"})
     run = client.post("/api/payruns", headers=h, json={"site_id": site, "start": t, "end": t}).json()
 
     # Pay only Musa
@@ -367,7 +367,7 @@ def test_check_in_still_asks_for_proof_when_day_already_exists(client):
     h, site = signup(client)
     w = add_worker(client, h, site, "Musa Abdullahi", "08030000001", 12000, "musa@personal.example.com")
     t = attendance.today()
-    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P"})
+    client.put(f"/api/register/{w['worker_id']}/{t}", headers=h, json={"status": "P", "review": "accepted"})
 
     r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"button_id": "check_in"})
     ask = r.json()["messages"][-1]["text"]
@@ -383,3 +383,52 @@ def test_check_in_still_asks_for_proof_when_day_already_exists(client):
 
     r = client.post(f"/api/simulator/{w['worker_id']}", headers=h, data={"button_id": "check_in"})
     assert "already checked in" in r.json()["messages"][-1]["text"]
+
+
+def test_only_approved_days_are_paid_and_pay_now_is_one_click(client):
+    import attendance
+    h, site = signup(client)
+    a = add_worker(client, h, site, "Musa Abdullahi", "08030000001", 12000, "musa@personal.example.com")
+    b = add_worker(client, h, site, "Chinedu Okafor", "08030000002", 6500, "chinedu@personal.example.com")
+    t = attendance.today()
+    client.put(f"/api/register/{a['worker_id']}/{t}", headers=h, json={"status": "P"})          # not approved
+    client.put(f"/api/register/{b['worker_id']}/{t}", headers=h, json={"status": "P", "review": "accepted"})
+
+    prev = client.get(f"/api/payruns/preview?site_id={site}&start={t}&end={t}", headers=h).json()
+    lines = {l["worker_id"]: l for l in prev["lines"]}
+    assert lines[a["worker_id"]]["net"] == 0 and lines[a["worker_id"]]["awaiting_approval"] == 1
+    assert lines[b["worker_id"]]["net"] == 6500
+
+    # Musa can't be paid until approved
+    r = client.post("/api/pay-now", headers=h, json={"site_id": site, "start": t, "end": t, "worker_ids": [a["worker_id"]]})
+    assert r.status_code == 422 and "approve" in r.json()["detail"].lower()
+
+    client.put(f"/api/register/{a['worker_id']}/{t}", headers=h, json={"review": "accepted"})
+    r = client.post("/api/pay-now", headers=h, json={"site_id": site, "start": t, "end": t, "worker_ids": [a["worker_id"]]})
+    assert r.status_code == 200, r.text
+    run = r.json()
+    assert [l["worker_id"] for l in run["lines"]] == [a["worker_id"]]
+    assert run["lines"][0]["transaction_status"] == "SUCCESS" and run["lines"][0]["notified"]
+
+    # Chinedu is still waiting; Pay all pays only him
+    r = client.post("/api/pay-now", headers=h, json={"site_id": site, "start": t, "end": t}).json()
+    assert [l["worker_id"] for l in r["lines"]] == [b["worker_id"]]
+
+
+def test_today_examples_show_good_and_bad(client):
+    import attendance
+    h, _ = signup(client)
+    site = client.post("/api/demo/seed", headers=h).json()["site"]["site_id"]
+    r = client.post("/api/demo/today", headers=h, json={"site_id": site})
+    assert r.status_code == 200, r.text
+    t = attendance.today()
+    rows = {x["name"].split()[0]: x for x in client.get(f"/api/register?site_id={site}&date={t}", headers=h).json()["rows"]}
+    assert rows["Chinedu"]["check"]["state"] == "verified"
+    assert rows["Chinedu"]["check"]["verdict"].startswith("AI confirms")
+    assert rows["Fatima"]["check"]["state"] == "issues"
+    assert any(not a["ok"] for a in rows["Fatima"]["check"]["answers"])
+    assert rows["Ibrahim"]["status"] == "A"
+    assert not rows["Musa"]["logged"]
+    # Running it again doesn't overwrite anything
+    again = client.post("/api/demo/today", headers=h, json={"site_id": site}).json()
+    assert again["added"] == []

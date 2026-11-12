@@ -1,5 +1,5 @@
-/** The AI check for a worker-day: verdict badge + the two findings the
- *  supervisor acts on (attendance, work done) + the checklist behind them. */
+/** The AI check for a worker-day. The supervisor reads this instead of
+ *  looking at every photo: one conclusion, three answers, then confirms. */
 
 export const CHECK_TONE = {
   verified: 'ok', issues: 'bad', no_proof: 'bad', pending: 'warn',
@@ -8,11 +8,10 @@ export const CHECK_TONE = {
 
 const ICON = { verified: '✅', issues: '⚠️', no_proof: '⛔', pending: '⏳', unavailable: '—', manual: '✍️', absent: '·' }
 
-export function CheckBadge({ check, compact }) {
+export function CheckBadge({ check }) {
   if (!check || check.state === 'none') return <span className="muted small">—</span>
   const tone = CHECK_TONE[check.state] || 'neutral'
-  const extra = check.state === 'issues' && !compact ? ` · ${check.issues.length}` : ''
-  return <span className={`chip chip-${tone}`}>{ICON[check.state]} {check.label}{extra}</span>
+  return <span className={`chip chip-${tone}`}>{ICON[check.state]} {check.label}</span>
 }
 
 export default function AiCheck({ check, onRerun, busy }) {
@@ -20,54 +19,32 @@ export default function AiCheck({ check, onRerun, busy }) {
   const tone = CHECK_TONE[check.state] || 'neutral'
   return (
     <div className={`ai-check ai-check-${tone}`}>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <strong style={{ fontSize: '0.95rem' }}>AI check</strong>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <strong>🤖 AI check</strong>
         <CheckBadge check={check} />
         <span className="spacer" />
         {onRerun && (
           <button className="btn btn-secondary btn-sm" disabled={busy} onClick={onRerun}>
-            {busy ? 'Checking…' : '↻ Run AI check'}
+            {busy ? 'Checking…' : '↻ Re-check'}
           </button>
         )}
       </div>
 
-      {check.state === 'no_proof' && (
-        <p className="small" style={{ marginBottom: 10 }}>
-          On the register, but the worker never shared a location or a check-in photo for this day.
-          Don't pay this day without asking them.
-        </p>
-      )}
-      {check.state === 'manual' && (
-        <p className="small" style={{ marginBottom: 10 }}>You logged this day on the dashboard. There's no WhatsApp proof to check.</p>
-      )}
-      {check.state === 'unavailable' && (
-        <p className="small" style={{ marginBottom: 10 }}>The AI couldn't read these photos. Look at them yourself, or run the check again.</p>
-      )}
+      <p className="ai-verdict">{check.verdict}</p>
 
-      {(check.attendance || check.work) && (
-        <div className="ai-findings">
-          {check.attendance && <p><span className="ai-tag">Attendance</span>{check.attendance}</p>}
-          {check.work && (
-            <p>
-              <span className="ai-tag">Work done</span>{check.work}
-              {check.work_status === 'completed' && <span className="chip chip-ok" style={{ marginLeft: 6 }}>Completed</span>}
-              {check.work_status === 'in_progress' && <span className="chip chip-neutral" style={{ marginLeft: 6 }}>In progress</span>}
-            </p>
-          )}
+      {check.answers?.length > 0 && (
+        <div className="ai-answers">
+          {check.answers.map((a) => (
+            <div key={a.q} className={`ai-answer ${a.ok ? 'ok' : 'bad'}`}>
+              <span className="ai-answer-icon">{a.ok ? '✓' : '✗'}</span>
+              <div>
+                <div className="ai-answer-q">{a.q}</div>
+                <div className="ai-answer-a">{a.a}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
-
-      {check.items?.length > 0 && (
-        <ul className="ai-items">
-          {check.items.map((i) => (
-            <li key={i.label} className={i.ok ? 'ok' : 'bad'}>
-              <span>{i.ok ? '✓' : '✗'}</span>
-              <span>{i.label}{i.detail ? <em> · {i.detail}</em> : null}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {check.sample_data && <p className="small muted" style={{ marginTop: 8 }}>Sample data from “Load demo crew”.</p>}
     </div>
   )
 }

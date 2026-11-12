@@ -104,6 +104,7 @@ Return ONE JSON object, nothing else:
   "is_work_related": true/false,
   "person_visible": true/false,
   "on_site": true/false,
+  "real_photo": true/false,
   "work_status": "completed" | "in_progress" | "not_visible",
   "finding": "the verdict in one line (max 18 words), see rules",
   "progress": "one short phrase on the work, e.g. 'block wall about 8 courses high'",
@@ -124,6 +125,7 @@ How to write "finding":
 - If you can't tell, say so plainly: "Can't confirm attendance: no worker visible and no site in view."
 
 Rules:
+- real_photo is false when the image is a drawing, cartoon, illustration, screenshot, a photo of a screen, or clearly edited. A normal phone photo (even a selfie, or slightly blurry) is true.
 - work_status: "completed" if a section of work looks finished, "in_progress" if work is clearly under way, "not_visible" if no work can be seen (normal for many check-in selfies).
 - on_site is true when the background clearly looks like a work site: buildings under construction, blocks, scaffolding, sand, tools, a farm or a loading yard.
 - is_work_related is false only if the photo clearly has nothing to do with site or farm work (a room at home, a screenshot, a meme, etc.).
@@ -188,10 +190,13 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
     quality = str(parsed.get("image_quality", "good")).lower()
     person = parsed.get("person_visible") is True
     on_site = parsed.get("on_site") is not False
+    real = parsed.get("real_photo") is not False
     stamp = str(parsed.get("visible_timestamp", "") or "").strip()[:40]
     stamp_date = _stamp_date(stamp) if stamp else None
 
     flags = []
+    if not real:
+        flags.append("not_real_photo")
     if parsed.get("is_work_related") is False:
         flags.append("unrelated")
     if not on_site:
@@ -209,6 +214,7 @@ async def summarise_photo(jpeg: bytes, caption: str = "", trade: str = "", purpo
         "is_work_related": parsed.get("is_work_related") is not False,
         "person_visible": person,
         "on_site": on_site,
+        "real_photo": real,
         "work_status": (str(parsed.get("work_status", "")).lower()
                         if str(parsed.get("work_status", "")).lower() in ("completed", "in_progress", "not_visible")
                         else "not_visible"),

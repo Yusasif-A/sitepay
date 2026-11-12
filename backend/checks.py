@@ -44,9 +44,10 @@ STATE_LABELS = {
 
 def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
     if not rec:
-        return {"state": "none", "label": "", "items": [], "issues": [], "summary": ""}
+        return {"state": "none", "label": "", "verdict": "", "answers": [], "items": [], "issues": [], "summary": ""}
     if rec.get("status") == "A":
-        return {"state": "absent", "label": STATE_LABELS["absent"], "items": [], "issues": [], "summary": ""}
+        return {"state": "absent", "label": STATE_LABELS["absent"], "verdict": "Marked absent. Nothing to pay.",
+                "answers": [], "items": [], "issues": [], "summary": ""}
 
     photos = [e for e in evs if e.get("kind") == "photo"]
     ci_id = rec.get("check_in_photo")
@@ -94,6 +95,10 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
     if photos:
         add("Fresh photos (not reused from another day)", not reused,
             f"{len(reused)} reused" if reused else "")
+    fake = [e for e in photos if (e.get("ai") or {}).get("ok") and (e["ai"].get("real_photo") is False)]
+    if photos:
+        add("Real photos (not drawings or screenshots)", not fake, f"{len(fake)} not real" if fake else "",
+            source="ai")
 
     issues = [i["label"] for i in items if not i["ok"]]
     if not location and not ci:
@@ -107,22 +112,57 @@ def day_check(rec: Optional[dict], evs: List[dict]) -> dict:
     else:
         state = "verified"
 
-    summaries = []
     attendance_finding = work_finding = ""
     if ci and (ci.get("ai") or {}).get("ok"):
         attendance_finding = ci["ai"].get("finding") or ci["ai"].get("summary", "")
     if latest and (latest.get("ai") or {}).get("ok"):
         work_finding = latest["ai"].get("finding") or latest["ai"].get("summary", "")
-    for f in (attendance_finding, work_finding):
-        if f:
-            summaries.append(f)
     work_status = ((latest or {}).get("ai") or {}).get("work_status", "") if latest else ""
+
+    # The three answers the supervisor needs, in plain words.
+    def ok(label):
+        return next((i["ok"] for i in items if i["label"] == label), None)
+
+    present_ok = bool(location) and bool(ci) and ok("Worker visible in check-in photo") is not False \
+        and ok("Check-in photo taken on a work site") is not False \
+        and ok("Photo date stamp matches the day") is not False
+    genuine_ok = ok("Fresh photos (not reused from another day)") is not False \
+        and ok("Real photos (not drawings or screenshots)") is not False
+    work_ok = bool(work) and ok("Work visible in work photo") is not False
+
+    answers = [
+        {"q": "Present on site?", "ok": present_ok,
+         "a": (attendance_finding or "Location and check-in photo received.") if present_ok else
+              ("No location shared." if not location else "No check-in photo." if not ci else
+               attendance_finding or "Check-in photo doesn't prove attendance.")},
+        {"q": "Photos genuine?", "ok": genuine_ok,
+         "a": "Real phone photos, taken for this day." if genuine_ok else
+              ("Photo was reused from another day." if reused else "Photo looks edited, drawn or a screenshot.")},
+        {"q": "Work done?", "ok": work_ok,
+         "a": (work_finding or "Work photo received.") if work_ok else
+              ("No work photo sent." if not work else work_finding or "No work visible in the photo.")},
+    ]
+    if state == "verified":
+        verdict = "AI confirms: present on site, photos genuine, work done. Safe to approve."
+    elif state == "issues":
+        verdict = "AI flags this day: " + "; ".join(a["a"] for a in answers if not a["ok"]) + " Check before approving."
+    elif state == "no_proof":
+        verdict = "No WhatsApp check-in for this day: no location and no photo. Don't pay without asking the worker."
+    elif state == "pending":
+        verdict = "AI is still reading the photos."
+    elif state == "unavailable":
+        verdict = "AI couldn't read the photos. Check them yourself."
+    else:
+        verdict = "Logged by you on the dashboard; no WhatsApp proof to check."
+
     return {
         "state": state,
         "label": STATE_LABELS[state],
+        "verdict": verdict,
+        "answers": answers if (location or ci) else [],
         "items": items,
         "issues": issues,
-        "summary": " · ".join(summaries),
+        "summary": " · ".join(f for f in (attendance_finding, work_finding) if f),
         "attendance": attendance_finding,
         "work": work_finding,
         "work_status": work_status,
